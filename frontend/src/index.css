@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+/*
+ * Global sizing baseline.
+ *
+ * 14px root keeps the overall design compact (all rem-based spacing, gaps,
+ * padding, radii and icon sizes shrink ~12.5%). Text sizes are pinned in px
+ * in the theme below so body copy stays at a normal, readable 14px.
+ */
+@layer base {
+  html {
+    font-size: 14px;
+  }
+}
+
+/*
+ * Slightly darker text palette.
+ *
+ * Every slate text tone is nudged one step darker for better contrast, while
+ * backgrounds, borders, icons and white-on-blue text stay unchanged. These
+ * unlayered rules intentionally win over Tailwind's layered utilities.
+ */
+.text-slate-300 { color: #94a3b8; }
+.text-slate-400 { color: #64748b; }
+.text-slate-500 { color: #475569; }
+.text-slate-600 { color: #334155; }
+.text-slate-700 { color: #1e293b; }
+.text-slate-800 { color: #0f172a; }
+.text-slate-900 { color: #020617; }
+
+/*
+ * Keep the original, lighter tones on dark surfaces (admin sidebar, image
+ * overlays) so the global darkening above doesn't hurt their contrast.
+ */
+[data-surface="dark"].text-slate-300,
+[data-surface="dark"] .text-slate-300 { color: #cbd5e1; }
+[data-surface="dark"].text-slate-400,
+[data-surface="dark"] .text-slate-400 { color: #94a3b8; }
+[data-surface="dark"].text-slate-500,
+[data-surface="dark"] .text-slate-500 { color: #64748b; }
+
+@theme {
+  /* Motion system: compact, fast transitions used across the app. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  --animate-page-in: page-in 360ms var(--ease-out-expo);
+  --animate-fade-in: fade-in 240ms ease-out both;
+  --animate-fade-up: fade-up 420ms var(--ease-out-expo) both;
+  --animate-scale-in: scale-in 240ms var(--ease-out-expo) both;
+  --animate-modal-in: modal-in 240ms var(--ease-out-expo) both;
+  --animate-sheet-right: sheet-right 240ms var(--ease-out-expo) both;
+  --animate-toast-in: toast-in 260ms var(--ease-out-expo) both;
+  --animate-seat-pop: seat-pop 260ms var(--ease-spring);
+  --animate-voyage-pulse: voyage-pulse 2.4s ease-out infinite;
+
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes sheet-right {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes seat-pop {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.16); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes voyage-pulse {
+    0% { box-shadow: 0 0 0 0 rgb(0 86 255 / 0.45), 0 6px 18px -4px rgb(0 86 255 / 0.65); }
+    70% { box-shadow: 0 0 0 12px rgb(0 86 255 / 0), 0 6px 18px -4px rgb(0 86 255 / 0.65); }
+    100% { box-shadow: 0 0 0 0 rgb(0 86 255 / 0), 0 6px 18px -4px rgb(0 86 255 / 0.65); }
+  }
+
+  /* Compact type scale (px-pinned so the 14px root doesn't shrink copy). */
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 19px;
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 18px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 22px;
+  --text-2xl--line-height: 29px;
+  --text-3xl: 26px;
+  --text-3xl--line-height: 33px;
+  --text-4xl: 30px;
+  --text-4xl--line-height: 37px;
+  --text-5xl: 36px;
+  --text-5xl--line-height: 42px;
+  --text-6xl: 42px;
+  --text-6xl--line-height: 48px;
+  --text-7xl: 48px;
+  --text-7xl--line-height: 54px;
+}
+
+/* Smooth scrolling only where it is wanted (landing anchors opt in via JS). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
