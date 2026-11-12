@@ -1,8 +1,25 @@
 import { NavLink } from 'react-router-dom';
-import { Ship, LayoutDashboard, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Ship,
+  LayoutDashboard,
+  CalendarDays,
+  Ticket,
+  CreditCard,
+  HelpCircle,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Map as MapIcon,
+} from 'lucide-react';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/map', label: 'Map & Routes', icon: MapIcon },
+  { to: '/find-ships', label: 'Ships', icon: Ship },
+  { to: '/bookings', label: 'My Bookings', icon: CalendarDays },
+  { to: '/tickets', label: 'Tickets', icon: Ticket },
+  { to: '/payment-methods', label: 'Payments', icon: CreditCard },
+  { to: '/help', label: 'Help & Support', icon: HelpCircle },
 ];
 
 export default function CustomerSidebar({

@@ -1,7 +1,7 @@
 // src/public/PublicHeader.jsx
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronDown, Globe, Menu, Ship, X } from 'lucide-react';
+import { ChevronDown, Globe, Menu, Ship, ShieldCheck, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useCurrency } from '../currency/CurrencyContext';
 

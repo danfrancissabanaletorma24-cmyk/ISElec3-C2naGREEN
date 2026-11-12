@@ -1,44 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Menu, LogOut, Ticket, CreditCard } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Bell, ChevronDown, Menu, User, Settings, LogOut, Ticket, CreditCard, Ship } from 'lucide-react';
+import { apiRequest } from '../api';
+import Avatar from './Avatar';
 import { useAuth } from '../auth/AuthContext';
 import useDismiss from './useDismiss';
 
-const AVATAR_IMG = 'https://i.pravatar.cc/150?img=11';
+const TYPE_ICONS = { booking: Ticket, payment: CreditCard, trip: Ship, system: Bell };
 
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: 'n1',
-    title: 'Trip reminder',
-    body: 'SuperCat 2 departs on May 20 at 2:00 PM. Arrive 30 minutes early.',
-    time: '5 min ago',
-    icon: Ticket,
-    read: false,
-  },
-  {
-    id: 'n2',
-    title: 'Payment received',
-    body: 'Your GCash payment of ₱1,680 for booking TRZ-20260520-001234 was confirmed.',
-    time: '2 hours ago',
-    icon: CreditCard,
-    read: false,
-  },
-  {
-    id: 'n3',
-    title: 'E-ticket ready',
-    body: 'Your e-ticket for Manila → Cebu is available to download.',
-    time: 'Yesterday',
-    icon: Ticket,
-    read: false,
-  },
-];
+function timeAgo(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'Yesterday' : `${days} days ago`;
+}
 
 export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const navigate = useNavigate();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState([]);
   const dropdownRef = useRef(null);
 
   const closeNotifications = () => setIsNotificationsOpen(false);
@@ -50,16 +35,40 @@ export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
     setIsProfileOpen(false);
   };
 
-  const handleMarkAllRead = () => {
-    setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+  const loadNotifications = async () => {
+    try {
+      const result = await apiRequest('/notifications/my', { token });
+      setNotifications((result.data || []).map((item) => ({
+        id: item._id,
+        title: item.title,
+        body: item.message,
+        time: timeAgo(item.createdAt),
+        icon: TYPE_ICONS[item.type] || Bell,
+        read: item.isRead,
+      })));
+    } catch {
+      /* keep the last list; the bell is not worth an error banner */
+    }
   };
 
-  const handleReadNotification = (id) => {
+  useEffect(() => {
+    if (!token) return undefined;
+    loadNotifications();
+    const timer = window.setInterval(loadNotifications, 60000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const handleMarkAllRead = async () => {
+    setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+    try { await apiRequest('/notifications/read-all', { token, method: 'PATCH' }); } catch { loadNotifications(); }
+  };
+
+  const handleReadNotification = async (id) => {
     setNotifications((current) =>
-      current.map((notification) =>
-        notification.id === id ? { ...notification, read: true } : notification,
-      ),
+      current.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)),
     );
+    try { await apiRequest(`/notifications/${id}/read`, { token, method: 'PATCH' }); } catch { loadNotifications(); }
   };
 
   useEffect(() => {
@@ -79,8 +88,8 @@ export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
     navigate('/login');
   };
 
-  const displayName = user?.name || 'Kerwin Tagle';
-  const displayEmail = user?.email || 'kerwin.tagle@email.com';
+  const displayName = user?.name || user?.firstName || 'Traveler';
+  const displayEmail = user?.email || '';
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 md:px-8">
@@ -193,11 +202,7 @@ export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
             aria-label="Account menu"
             className="flex items-center gap-2 rounded-xl py-1 pl-1 pr-1 text-left transition-colors hover:bg-slate-100 sm:gap-3 sm:pr-2"
           >
-            <img
-              src={AVATAR_IMG}
-              alt={displayName}
-              className="h-9 w-9 rounded-full border-2 border-transparent object-cover transition-colors"
-            />
+            <Avatar user={user} className="h-9 w-9 border-2 border-transparent" />
             <span className="hidden text-sm font-semibold text-slate-700 sm:block">{displayName}</span>
             <ChevronDown
               className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${
@@ -215,6 +220,22 @@ export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
                 <p className="text-sm font-bold text-slate-800">{displayName}</p>
                 <p className="truncate text-xs text-slate-500">{displayEmail}</p>
               </div>
+              <Link
+                to="/profile"
+                role="menuitem"
+                onClick={() => setIsProfileOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                <User className="h-4 w-4 text-slate-400" /> My Profile
+              </Link>
+              <Link
+                to="/settings"
+                role="menuitem"
+                onClick={() => setIsProfileOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                <Settings className="h-4 w-4 text-slate-400" /> Account Settings
+              </Link>
               <div className="my-1 border-t border-slate-100" />
               <button
                 type="button"

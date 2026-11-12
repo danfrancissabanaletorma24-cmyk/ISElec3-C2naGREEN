@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CalendarDays, MapPin, Play, RotateCcw, Ship, Square } from 'lucide-react';
 import VoyageMapLazy from './VoyageMapLazy';
 import { useCurrency } from '../currency/CurrencyContext';
@@ -76,6 +77,12 @@ export default function LiveVoyageCard({ ticket }) {
         <p className="mt-2 text-sm text-slate-500">
           Book a ferry and you will be able to follow its progress across the sea here.
         </p>
+        <Link
+          to="/search"
+          className="mt-3 inline-block rounded-lg bg-[#0056FF] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800"
+        >
+          Search Trips
+        </Link>
       </div>
     );
   }
@@ -187,6 +194,12 @@ export default function LiveVoyageCard({ ticket }) {
                 <><Play className="h-4 w-4" /> Simulate voyage</>
               )}
             </button>
+            <Link
+              to="/tickets"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              View ticket
+            </Link>
             <span className="ml-auto text-[11px] text-slate-400">
               Fare {format(ticket.price)}
             </span>

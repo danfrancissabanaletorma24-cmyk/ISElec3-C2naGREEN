@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   Ship, Calendar, User, Search, ShieldCheck, ChevronDown,
   Ticket, ArrowRight,
@@ -9,18 +10,27 @@ import PublicHeader from './public/PublicHeader';
 import PublicFooter from './public/PublicFooter';
 import { useLanguage } from './i18n/LanguageContext';
 import { useCurrency } from './currency/CurrencyContext';
-import { TRIPS, getShipTypeLabel } from './data/customerData';
+import { getShipTypeLabel, getDestination, toISODate } from './data/customerData';
+import useApiData from './hooks/useApiData';
+import usePopularRoutes from './hooks/usePopularRoutes';
+import { usePorts } from './data/ports';
 import { LIFT, STAGGER } from './components/motion';
 
 export default function LandingPage() {
-  const HERO_IMG = "/supercat.jpg";
-  const FALLBACK_IMG = "https://images.unsplash.com/photo-1599827552599-eadf5f19bd4c?auto=format&fit=crop&w=1200&q=80";
+  const HERO_IMG = "/ships/kho-roro.jpg";
+  const FALLBACK_IMG = "/ships/montenegro-roro.jpg";
   const { t } = useLanguage();
   const { format } = useCurrency();
+  const { ports } = usePorts();
+  const { routes: featuredRoutes } = usePopularRoutes(4);
+  const { data: boatData } = useApiData('/boats?status=active&limit=3');
+  const featuredShips = boatData?.data || [];
+  const tomorrow = toISODate(new Date(Date.now() + 86400000));
 
   const handleImgError = (e) => {
     e.target.src = FALLBACK_IMG;
   };
+  const portCity = (code) => ports.find((port) => port.code === code)?.city || getDestination(code).city;
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-800">
@@ -72,16 +82,23 @@ export default function LandingPage() {
       <section id="destinations" className="max-w-[1200px] mx-auto px-6 md:px-12 lg:px-16 py-12 scroll-mt-24">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-[22px] font-bold text-slate-900">{t('section.popular')}</h2>
+          <Link to="/destinations" className="text-[14px] font-semibold text-[#1E56D6] flex items-center gap-1 hover:underline">
+            {t('section.viewAll')} <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
 
         <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 ${STAGGER}`}>
-          {[
-            { route: "Manila → Cebu", type: "Fast Craft", time: "2h 30m", departure: "9:00 PM", arrival: "4:00 PM", price: "840", img: HERO_IMG },
-            { route: "Cebu → Bohol", type: "RoRo / Ferry", time: "2h 00m", departure: "8:00 AM", arrival: "10:00 AM", price: "650", img: "https://images.pexels.com/photos/1118879/pexels-photo-1118879.jpeg?auto=compress&cs=tinysrgb&w=600" },
-            { route: "Caticlan → Boracay", type: "Fast Craft", time: "1h 00m", departure: "6:00 PM", arrival: "7:00 PM", price: "550", img: "https://images.pexels.com/photos/163236/luxury-yacht-boat-speed-water-163236.jpeg?auto=compress&cs=tinysrgb&w=600" },
-            { route: "Bacolod → Iloilo", type: "RoRo / Ferry", time: "1h 30m", departure: "7:30 AM", arrival: "9:00 AM", price: "420", img: "https://images.pexels.com/photos/2414442/pexels-photo-2414442.jpeg?auto=compress&cs=tinysrgb&w=600" },
-          ].map((item, i) => (
-            <div key={i} className={`relative rounded-xl overflow-hidden group cursor-pointer h-[240px] bg-slate-200 ${LIFT}`}>
+          {featuredRoutes.map((r) => ({
+            route: `${portCity(r.from)} → ${portCity(r.to)}`,
+            type: r.shipType ? getShipTypeLabel(r.shipType) : 'Route',
+            time: r.duration,
+            price: r.price,
+            sailings: r.sailings,
+            img: r.image || HERO_IMG,
+            from: r.from,
+            to: r.to,
+          })).map((item, i) => (
+            <Link key={i} to={`/search?from=${item.from}&to=${item.to}&date=${tomorrow}&adults=1&shipType=any`} className={`relative rounded-xl overflow-hidden group cursor-pointer h-[240px] bg-slate-200 ${LIFT}`}>
               <img 
                 src={item.img} 
                 alt={item.route} 
@@ -93,11 +110,15 @@ export default function LandingPage() {
               <div className="absolute bottom-4 left-4 right-4 text-white" data-surface="dark">
                 <h3 className="font-bold text-[18px] mb-1">{item.route}</h3>
                 <p className="text-[13px] text-slate-200 mb-1">
-                  {item.departure} → {item.arrival} <span className="text-slate-300">• {item.time}</span>
+                  {item.time || 'No upcoming sailing'}
                 </p>
-                <p className="text-[14px] font-semibold">{t('common.from')} {format(item.price)} <span className="text-[12px] font-normal text-slate-300">{t('common.perPerson')}</span></p>
+                <p className="text-[14px] font-semibold">
+                  {item.sailings > 0
+                    ? <>{t('common.from')} {format(item.price)} <span className="text-[12px] font-normal text-slate-300">{t('common.perPerson')}</span></>
+                    : 'No upcoming sailing'}
+                </p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -110,28 +131,33 @@ export default function LandingPage() {
               <h2 className="text-[22px] font-bold text-slate-900">{t('ships.title')}</h2>
               <p className="mt-1 text-[13px] text-slate-500">{t('ships.sub')}</p>
             </div>
+            <Link to="/ships" className="flex shrink-0 items-center gap-1 text-[13px] font-semibold text-[#1E56D6] hover:underline">
+              {t('nav.ships')} <ArrowRight className="w-4 h-4" />
+            </Link>
           </div>
           <div className={`grid gap-4 md:grid-cols-3 ${STAGGER}`}>
-            {TRIPS.slice(0, 3).map((trip) => (
-              <div key={trip.id} className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${LIFT}`}>
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-[#0056FF]">
-                    <Ship className="h-5 w-5" />
+            {featuredShips.map((boat) => (
+              <div key={boat._id} className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${LIFT}`}>
+                <img
+                  src={boat.imageUrl || HERO_IMG}
+                  alt={boat.name}
+                  className="h-40 w-full object-cover"
+                  onError={handleImgError}
+                />
+                <div className="p-5">
+                  <div className="mb-3 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-[#0056FF]">
+                      <Ship className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">{boat.name}</h3>
+                      <p className="text-[11px] text-slate-500">{boat.operator}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">{trip.name}</h3>
-                    <p className="text-[11px] text-slate-500">{trip.type} · {trip.class}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500">{getShipTypeLabel(boat.boatType)}</span>
+                    <span className="text-[12px] font-semibold text-slate-700">{boat.seatCapacity} seats</span>
                   </div>
-                </div>
-                <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-[12px]">
-                  <span className="font-semibold text-slate-800">{trip.departure}</span>
-                  <span className="text-slate-400">→</span>
-                  <span className="font-semibold text-slate-800">{trip.arrival}</span>
-                  <span className="text-slate-500">· {trip.duration}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-slate-500">{getShipTypeLabel(trip.shipType)}</span>
-                  <span className="text-base font-bold text-[#0056FF]">{format(trip.price)}</span>
                 </div>
               </div>
             ))}
@@ -208,7 +234,7 @@ export default function LandingPage() {
 
               <div className="p-4 bg-slate-50 flex-1 overflow-y-auto">
                 <h4 className="font-bold text-[14px] text-slate-900 mb-0.5">Search Results</h4>
-                <p className="text-[10px] text-slate-500 mb-4">Manila (MNL) → Cebu (CEB)<br/>May 20, 2026 • 1 Adult</p>
+                <p className="text-[10px] text-slate-500 mb-4">Mobo (MBO) → Pio Duran (PDU)<br/>Search by date • 1 Adult</p>
                 
                 <div className="flex flex-wrap gap-1.5 text-[10px] mb-4">
                    <span className="bg-[#1E56D6] text-white px-3 py-1 rounded-full font-medium">All</span>
@@ -218,9 +244,9 @@ export default function LandingPage() {
 
                 <div className="space-y-3">
                   {[
-                    {name: "SuperCat 2", price: "₱840", img: HERO_IMG},
-                    {name: "OceanJet 888", price: "₱780", img: "https://images.pexels.com/photos/1118879/pexels-photo-1118879.jpeg?auto=compress&cs=tinysrgb&w=100"},
-                    {name: "2GO Maligaya", price: "₱660", img: "https://images.pexels.com/photos/2414442/pexels-photo-2414442.jpeg?auto=compress&cs=tinysrgb&w=100"}
+                    {name: "MV Esperanza Star", price: "₱380", img: "/ships/kho-roro.jpg"},
+                    {name: "MV Mobo", price: "₱300", img: "/ships/kho-cargo.png"},
+                    {name: "MV Ricardo 5", price: "₱320", img: "/ships/kho-fast-craft.jpg"}
                   ].map((s, i) => (
                     <div key={i} className="bg-white border border-slate-100 rounded-xl p-2 flex gap-2 shadow-sm items-center">
                       <img 
@@ -261,8 +287,8 @@ export default function LandingPage() {
                </div>
                
                <div className="p-4 flex-1 flex flex-col bg-white overflow-y-auto">
-                 <h4 className="font-bold text-[13px] text-slate-900 mb-0.5">Manila → Cebu</h4>
-                 <p className="text-[10px] text-slate-500 mb-2">SuperCat 2 • 2h 30m</p>
+                 <h4 className="font-bold text-[13px] text-slate-900 mb-0.5">Mobo → Pio Duran</h4>
+                 <p className="text-[10px] text-slate-500 mb-2">MV Esperanza Star • 5h</p>
                  
                  <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-[9px] mb-2">
                    <span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-blue-50 border border-blue-200 rounded-sm"></div>Available</span>
@@ -321,7 +347,7 @@ export default function LandingPage() {
                  <div className="space-y-1.5 mb-2 overflow-y-auto flex-1 min-h-0 pr-0.5">
                    <div>
                      <label className="text-[10px] font-medium text-slate-500">Full Name</label>
-                     <input type="text" value="Juan Dela Cruz" className="w-full border border-slate-200 rounded-lg px-2.5 py-1 mt-1 text-[11px] text-slate-800" readOnly/>
+                     <input type="text" value="Your Name" className="w-full border border-slate-200 rounded-lg px-2.5 py-1 mt-1 text-[11px] text-slate-800" readOnly/>
                    </div>
                    <div>
                      <label className="text-[10px] font-medium text-slate-500">Contact Number</label>
@@ -374,10 +400,10 @@ export default function LandingPage() {
                  </div>
                  
                  <div className="text-[10px] text-slate-600 mb-3 w-full border-t border-b border-slate-200 py-2">
-                   <p className="font-bold text-slate-900 mb-0.5">Manila → Cebu</p>
-                   <p className="text-[9px] text-slate-500">May 20, 2026 • 2h 30m</p>
-                   <p className="font-bold text-slate-800 mt-1.5">Juan Dela Cruz</p>
-                   <p className="text-[9px] text-slate-500">Seat B5, B6 • SuperCat 2</p>
+                   <p className="font-bold text-slate-900 mb-0.5">Mobo → Pio Duran</p>
+                   <p className="text-[9px] text-slate-500">Departs 5:00 AM • 5h</p>
+                   <p className="font-bold text-slate-800 mt-1.5">Your Name</p>
+                   <p className="text-[9px] text-slate-500">Seat B5 • MV Esperanza Star</p>
                  </div>
                  
                  <div className="mt-auto w-full space-y-1.5 pb-1">
@@ -417,6 +443,9 @@ export default function LandingPage() {
               <h2 className="text-[22px] font-bold text-slate-900">{t('help.title')}</h2>
               <p className="mt-1 text-[13px] text-slate-500">{t('help.sub')}</p>
             </div>
+            <Link to="/support" className="flex shrink-0 items-center gap-1 text-[13px] font-semibold text-[#1E56D6] hover:underline">
+              {t('help.contact')} <ArrowRight className="w-4 h-4" />
+            </Link>
           </div>
           <div className={`grid gap-4 md:grid-cols-3 ${STAGGER}`}>
             {[

@@ -1,172 +1,46 @@
 // src/data/geo.js
-// Geographic data and helpers for the voyage map.
-// Coordinates are approximate port locations in the Philippines. Route
-// waypoints follow the general sea lanes ferries use so the line stays on
-// water instead of cutting across islands.
+// Geographic helpers for the voyage map. Port coordinates are stored with each port in the database.
 
-export const PORT_COORDINATES = {
-  MNL: [14.5833, 120.9667], // Manila
-  CEB: [10.293, 123.905], // Cebu
-  TAG: [9.6475, 123.8537], // Tagbilaran, Bohol
-  MPH: [11.9276, 121.9556], // Caticlan
-  BOR: [11.9674, 121.9248], // Boracay
-  BCD: [10.6765, 122.9509], // Bacolod
-  ILO: [10.7202, 122.5621], // Iloilo
-  DGT: [9.3068, 123.3054], // Dumaguete
-  BTG: [13.7565, 121.0583], // Batangas
-  CPL: [13.4116, 121.1803], // Calapan
-};
+import { getAllPorts, getDestination } from './ports';
 
-// Display names for each port, used when building and resolving route labels.
 export const PORT_LABELS = {
-  MNL: 'Manila',
-  CEB: 'Cebu',
-  TAG: 'Bohol',
-  MPH: 'Caticlan',
-  BOR: 'Boracay',
-  BCD: 'Bacolod',
-  ILO: 'Iloilo',
-  DGT: 'Dumaguete',
-  BTG: 'Batangas',
-  CPL: 'Calapan',
+  MBO: 'Mobo',
+  MSB: 'Masbate City',
+  PDU: 'Pio Duran',
+  PLR: 'Pilar',
 };
 
-// Maps the human-readable route labels used by the admin console to port codes.
-export const ROUTE_PORT_CODES = {
-  'Manila → Cebu': ['MNL', 'CEB'],
-  'Cebu → Bohol': ['CEB', 'TAG'],
-  'Caticlan → Boracay': ['MPH', 'BOR'],
-  'Bacolod → Iloilo': ['BCD', 'ILO'],
-};
+const PORT_CODES_BY_LABEL = Object.fromEntries(
+  Object.entries(PORT_LABELS).map(([code, label]) => [label.toLowerCase(), code]),
+);
 
-/**
- * Resolves a route label such as "Manila → Cebu" to its port codes. New routes
- * created from the admin pick port names from PORT_LABELS, so they resolve too.
- * Returns null when the label cannot be mapped.
- */
-export function getRoutePortCodes(label) {
-  const known = ROUTE_PORT_CODES[label];
-  if (known) return known;
+/** Convert a route label such as "Mobo → Pio Duran" into its port codes. */
+export function getRoutePortCodes(route) {
+  const [origin, destination] = String(route || '').split('→').map((part) => part.trim());
+  if (!origin || !destination) return null;
 
-  const names = String(label ?? '')
-    .split('→')
-    .map((part) => part.trim().toLowerCase());
-  if (names.length !== 2) return null;
+  const from = PORT_CODES_BY_LABEL[origin.toLowerCase()];
+  const to = PORT_CODES_BY_LABEL[destination.toLowerCase()];
+  return from && to ? [from, to] : null;
+}
 
-  const codes = names.map((name) => (
-    Object.entries(PORT_LABELS).find(([, portName]) => portName.toLowerCase() === name)?.[0]
-  ));
-
-  return codes[0] && codes[1] ? codes : null;
+/** [lat, lng] of a port code, or null when the port has no coordinates yet. */
+export function getPortCoordinate(code) {
+  const port = getAllPorts().find((item) => item.code === code);
+  if (!port || typeof port.latitude !== 'number' || typeof port.longitude !== 'number') return null;
+  return [port.latitude, port.longitude];
 }
 
 /** Human-readable port name for a port code. */
 export function getPortLabel(code) {
-  return PORT_LABELS[code] ?? code;
+  return getDestination(code).city;
 }
 
-// Keyed `FROM-TO`. Reverse pairs are generated automatically.
-const ROUTE_WAYPOINTS = {
-  'MNL-CEB': [
-    [14.5833, 120.9667],
-    [14.35, 120.8],
-    [13.95, 120.68],
-    [13.55, 120.78],
-    [13.15, 121.1],
-    [12.6, 121.7],
-    [11.95, 122.4],
-    [11.35, 122.95],
-    [10.8, 123.45],
-    [10.48, 123.72],
-    [10.293, 123.905],
-  ],
-  'CEB-TAG': [
-    [10.293, 123.905],
-    [10.18, 123.95],
-    [9.98, 123.95],
-    [9.78, 123.9],
-    [9.6475, 123.8537],
-  ],
-  'MPH-BOR': [
-    [11.9276, 121.9556],
-    [11.94, 121.945],
-    [11.955, 121.935],
-    [11.9674, 121.9248],
-  ],
-  'BCD-ILO': [
-    [10.6765, 122.9509],
-    [10.71, 122.86],
-    [10.72, 122.75],
-    [10.71, 122.65],
-    [10.7202, 122.5621],
-  ],
-  'MNL-BTG': [
-    [14.5833, 120.9667],
-    [14.3, 120.72],
-    [14.0, 120.8],
-    [13.85, 120.95],
-    [13.7565, 121.0583],
-  ],
-  'BTG-CPL': [
-    [13.7565, 121.0583],
-    [13.62, 121.1],
-    [13.5, 121.14],
-    [13.4116, 121.1803],
-  ],
-  'CEB-DGT': [
-    [10.293, 123.905],
-    [10.12, 123.72],
-    [9.92, 123.55],
-    [9.72, 123.4],
-    [9.5, 123.32],
-    [9.3068, 123.3054],
-  ],
-  'CEB-BCD': [
-    [10.293, 123.905],
-    [10.38, 123.72],
-    [10.48, 123.5],
-    [10.56, 123.28],
-    [10.62, 123.1],
-    [10.6765, 122.9509],
-  ],
-  'ILO-DGT': [
-    [10.7202, 122.5621],
-    [10.45, 122.8],
-    [10.1, 123.0],
-    [9.75, 123.18],
-    [9.5, 123.27],
-    [9.3068, 123.3054],
-  ],
-  'CEB-ILO': [
-    [10.293, 123.905],
-    [10.42, 123.7],
-    [10.5, 123.45],
-    [10.58, 123.2],
-    [10.66, 122.95],
-    [10.72, 122.75],
-    [10.7202, 122.5621],
-  ],
-};
-
-export function getPortCoordinate(code) {
-  return PORT_COORDINATES[code] ?? null;
-}
-
-/**
- * Returns a sea-lane path for a port pair. Falls back to a straight line when
- * no curated route exists, and reverses curated routes for the opposite leg.
- */
+/** Route line between two ports (straight line - it is a schedule guide, not a navigation chart). */
 export function getRoutePath(from, to) {
   const origin = getPortCoordinate(from);
   const destination = getPortCoordinate(to);
   if (!origin || !destination) return [];
-
-  const direct = ROUTE_WAYPOINTS[`${from}-${to}`];
-  if (direct) return direct;
-
-  const reverse = ROUTE_WAYPOINTS[`${to}-${from}`];
-  if (reverse) return [...reverse].reverse();
-
   return [origin, destination];
 }
 
@@ -227,30 +101,6 @@ export function getPointAlongPath(path, progress) {
   ];
 }
 
-/** "2:00 PM" -> { hours, minutes } */
-function parseTime(value) {
-  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(value ?? '');
-  if (!match) return null;
-  let hours = Number(match[1]) % 12;
-  if (match[3].toUpperCase() === 'PM') hours += 12;
-  return { hours, minutes: Number(match[2]) };
-}
-
-function combineDateAndTime(dateISO, timeValue) {
-  const time = parseTime(timeValue);
-  const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateISO ?? '');
-  if (!time || !dateParts) return null;
-  return new Date(
-    Number(dateParts[1]),
-    Number(dateParts[2]) - 1,
-    Number(dateParts[3]),
-    time.hours,
-    time.minutes,
-    0,
-    0,
-  );
-}
-
 /** Formats a minute count as "2h 30m" / "45m". */
 export function formatDurationMinutes(minutes) {
   const safe = Math.max(0, Math.round(minutes));
@@ -262,36 +112,26 @@ export function formatDurationMinutes(minutes) {
 
 /**
  * Works out where a sailing is in its journey.
+ * @param {{ departureAt: string, arrivalAt: string }} trip  ISO timestamps from the API
  * @returns {{ status: 'scheduled'|'at-sea'|'arrived', progress: number, etaMinutes: number }}
  */
-export function getVoyageState(ticket, now = new Date()) {
-  const departure = combineDateAndTime(ticket?.date, ticket?.departure);
-  let arrival = combineDateAndTime(ticket?.date, ticket?.arrival);
+export function getVoyageState(trip, now = new Date()) {
+  const departure = trip?.departureAt ? new Date(trip.departureAt) : null;
+  const arrival = trip?.arrivalAt ? new Date(trip.arrivalAt) : null;
 
-  if (!departure || !arrival) {
+  if (!departure || !arrival || Number.isNaN(departure.getTime()) || Number.isNaN(arrival.getTime())) {
     return { status: 'scheduled', progress: 0, etaMinutes: 0 };
-  }
-  // Overnight sailings arrive the next day.
-  if (arrival <= departure) {
-    arrival = new Date(arrival.getTime() + 24 * 60 * 60 * 1000);
   }
 
   if (now < departure) {
-    return {
-      status: 'scheduled',
-      progress: 0,
-      etaMinutes: Math.ceil((departure - now) / 60000),
-    };
+    return { status: 'scheduled', progress: 0, etaMinutes: Math.ceil((departure - now) / 60000) };
   }
-
   if (now >= arrival) {
     return { status: 'arrived', progress: 1, etaMinutes: 0 };
   }
-
-  const duration = arrival - departure;
   return {
     status: 'at-sea',
-    progress: (now - departure) / duration,
+    progress: (now - departure) / (arrival - departure),
     etaMinutes: Math.ceil((arrival - now) / 60000),
   };
 }

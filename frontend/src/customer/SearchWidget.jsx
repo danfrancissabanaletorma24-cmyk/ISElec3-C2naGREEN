@@ -1,19 +1,20 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Ship, User, CalendarDays, ChevronDown, MapPin, ArrowRightLeft, Search,
-  Map, RefreshCcw, Minus, Plus, X,
+  Map as MapIcon, RefreshCcw, Minus, Plus, X,
 } from 'lucide-react';
 import useDismiss from './useDismiss';
 import {
-  DESTINATIONS, SHIP_TYPES, getDestination, getShipTypeLabel, toISODate,
+  SHIP_TYPES, getDestination, getShipTypeLabel, toISODate,
 } from '../data/customerData';
+import { loadPorts, usePorts } from '../data/ports';
 import { buildSearchParams, passengerSummary } from './searchValues';
 import { PRESSABLE } from '../components/motion';
 
 const TRIP_TYPES = [
   { id: 'one-way', label: 'One-Way', icon: ArrowRightLeft },
   { id: 'round-trip', label: 'Round Trip', icon: RefreshCcw },
-  { id: 'multi-city', label: 'Multi-City', icon: Map },
+  { id: 'multi-city', label: 'Multi-City', icon: MapIcon },
 ];
 
 function Stepper({ label, hint, value, min, max, onChange }) {
@@ -73,14 +74,14 @@ function FieldButton({ label, icon: Icon, value, isOpen, onClick }) {
   );
 }
 
-function DestinationMenu({ label, selected, onSelect }) {
+function DestinationMenu({ label, options, selected, onSelect, emptyMessage }) {
   return (
     <div
       role="listbox"
       aria-label={label}
       className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
     >
-      {DESTINATIONS.map((destination) => (
+      {options.map((destination) => (
         <button
           key={destination.code}
           type="button"
@@ -97,6 +98,18 @@ function DestinationMenu({ label, selected, onSelect }) {
           <span className="text-xs opacity-70">{destination.code}</span>
         </button>
       ))}
+      {!options.length && (
+        <div className="px-3 py-2 text-sm text-slate-500">
+          <p>{emptyMessage}</p>
+          <button
+            type="button"
+            onClick={() => loadPorts(true)}
+            className="mt-1 font-semibold text-[#0056FF] hover:underline"
+          >
+            Reload routes
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -127,6 +140,7 @@ export default function SearchWidget({
   submitLabel = 'Search Ships',
   className = '',
 }) {
+  const { ports: PORTS, routes, status: routeStatus, error: routeError } = usePorts();
   const [openMenu, setOpenMenu] = useState(null);
   const [error, setError] = useState('');
   const [today] = useState(() => toISODate(new Date()));
@@ -136,12 +150,71 @@ export default function SearchWidget({
 
   const update = (patch) => onChange({ ...values, ...patch });
 
+  const originOptions = useMemo(() => {
+    const originCodes = new Set(routes.map((route) => route.origin.code));
+    return PORTS.filter((port) => originCodes.has(port.code));
+  }, [PORTS, routes]);
+
+  const destinationsByOrigin = useMemo(() => {
+    const byOrigin = new Map();
+    routes.forEach((route) => {
+      const code = route.origin.code;
+      const destinations = byOrigin.get(code) || [];
+      if (!destinations.some((port) => port.code === route.destination.code)) {
+        destinations.push(route.destination);
+      }
+      byOrigin.set(code, destinations);
+    });
+    return byOrigin;
+  }, [routes]);
+
+  const destinationsFor = (origin) => destinationsByOrigin.get(origin) || [];
+  const destinationOptions = destinationsFor(values.from);
+  const legDestinationOptions = destinationsFor(values.legFrom);
+
+  const emptyRouteMessage = routeStatus === 'loading'
+    ? 'Loading routes…'
+    : routeError || 'No active routes are available.';
+
+  // Keep the selected endpoints valid as routes are loaded, added, or deleted.
+  useEffect(() => {
+    if (!originOptions.length) return;
+    const from = originOptions.some((port) => port.code === values.from)
+      ? values.from
+      : originOptions[0].code;
+    const destinations = destinationsFor(from);
+    const to = destinations.some((port) => port.code === values.to)
+      ? values.to
+      : destinations[0]?.code || '';
+    const legFrom = originOptions.some((port) => port.code === values.legFrom)
+      ? values.legFrom
+      : from;
+    const legDestinations = destinationsFor(legFrom);
+    const legTo = legDestinations.some((port) => port.code === values.legTo)
+      ? values.legTo
+      : legDestinations[0]?.code || '';
+    if (
+      from !== values.from || to !== values.to
+      || legFrom !== values.legFrom || legTo !== values.legTo
+    ) {
+      onChange({ ...values, from, to, legFrom, legTo });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    originOptions,
+    destinationsByOrigin,
+    values.from,
+    values.to,
+    values.legFrom,
+    values.legTo,
+  ]);
+
   const setPassenger = (key, rawValue) => {
     const next = { ...values, [key]: rawValue };
-    next.adults = Math.max(1, Math.min(9, next.adults));
-    next.children = Math.max(0, Math.min(8, next.children));
-    next.seniors = Math.max(0, Math.min(8, next.seniors ?? 0));
-    next.infants = Math.max(0, Math.min(next.adults, next.infants));
+    next.adults = Math.max(0, Math.min(9, next.adults));
+    next.children = Math.max(0, Math.min(9, next.children));
+    next.seniors = Math.max(0, Math.min(9, next.seniors ?? 0));
+    next.infants = 0;
     onChange(next);
   };
 
@@ -149,6 +222,12 @@ export default function SearchWidget({
     event.preventDefault();
     if (values.from === values.to) {
       setError('Origin and destination must be different.');
+      return;
+    }
+    if (!routes.some((route) => (
+      route.origin.code === values.from && route.destination.code === values.to
+    ))) {
+      setError('This route is unavailable. Choose an active route.');
       return;
     }
     if (!values.date) {
@@ -164,8 +243,8 @@ export default function SearchWidget({
     onSearch(buildSearchParams(values));
   };
 
-  const originLabel = `${getDestination(values.from).city} (${values.from})`;
-  const destinationLabel = `${getDestination(values.to).city} (${values.to})`;
+  const originLabel = values.from ? `${getDestination(values.from).city} (${values.from})` : 'Select a route';
+  const destinationLabel = values.to ? `${getDestination(values.to).city} (${values.to})` : 'Select a route';
 
   return (
     <div
@@ -205,8 +284,10 @@ export default function SearchWidget({
               {openMenu === 'from' && (
                 <DestinationMenu
                   label="Origin"
+                  options={originOptions}
                   selected={values.from}
                   onSelect={(code) => { update({ from: code }); closeMenu(); setError(''); }}
+                  emptyMessage={emptyRouteMessage}
                 />
               )}
             </div>
@@ -215,8 +296,14 @@ export default function SearchWidget({
               <button
                 type="button"
                 onClick={() => {
-                  update({ from: values.to, to: values.from });
-                  setError('');
+                  if (routes.some((route) => (
+                    route.origin.code === values.to && route.destination.code === values.from
+                  ))) {
+                    update({ from: values.to, to: values.from });
+                    setError('');
+                  } else {
+                    setError('There is no active route in the opposite direction.');
+                  }
                 }}
                 aria-label="Swap origin and destination"
                 title="Swap origin and destination"
@@ -237,8 +324,10 @@ export default function SearchWidget({
               {openMenu === 'to' && (
                 <DestinationMenu
                   label="Destination"
+                  options={destinationOptions}
                   selected={values.to}
                   onSelect={(code) => { update({ to: code }); closeMenu(); setError(''); }}
+                  emptyMessage={emptyRouteMessage}
                 />
               )}
             </div>
@@ -278,9 +367,18 @@ export default function SearchWidget({
                   label="Adults"
                   hint="Age 12 and above"
                   value={values.adults}
-                  min={1}
+                  min={0}
                   max={9}
                   onChange={(value) => setPassenger('adults', value)}
+                />
+                 <div className="my-1 border-t border-slate-100" />
+                <Stepper
+                  label="Students"
+                  hint="Age 12 and above · 10% off"
+                  value={values.students ?? 0}
+                  min={0}
+                  max={9}
+                  onChange={(value) => setPassenger('students', value)}
                 />
                 <div className="my-1 border-t border-slate-100" />
                 <Stepper
@@ -288,7 +386,7 @@ export default function SearchWidget({
                   hint="Age 2 – 11 · 50% off"
                   value={values.children}
                   min={0}
-                  max={8}
+                  max={9}
                   onChange={(value) => setPassenger('children', value)}
                 />
                 <div className="my-1 border-t border-slate-100" />
@@ -297,17 +395,16 @@ export default function SearchWidget({
                   hint="Age 60+ · 20% off"
                   value={values.seniors ?? 0}
                   min={0}
-                  max={8}
+                  max={9}
                   onChange={(value) => setPassenger('seniors', value)}
                 />
-                <div className="my-1 border-t border-slate-100" />
                 <Stepper
-                  label="Infants"
-                  hint="Under 2 (lap seat)"
-                  value={values.infants}
+                  label="PWD"
+                  hint="20% off"
+                  value={values.pwd ?? 0}
                   min={0}
-                  max={values.adults}
-                  onChange={(value) => setPassenger('infants', value)}
+                  max={9}
+                  onChange={(value) => setPassenger('pwd', value)}
                 />
                 <button
                   type="button"
@@ -371,7 +468,7 @@ export default function SearchWidget({
                 onChange={(event) => update({ legFrom: event.target.value })}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/15"
               >
-                {DESTINATIONS.map((destination) => (
+                {originOptions.map((destination) => (
                   <option key={destination.code} value={destination.code}>
                     {destination.city} ({destination.code})
                   </option>
@@ -385,7 +482,7 @@ export default function SearchWidget({
                 onChange={(event) => update({ legTo: event.target.value })}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/15"
               >
-                {DESTINATIONS.map((destination) => (
+                {legDestinationOptions.map((destination) => (
                   <option key={destination.code} value={destination.code}>
                     {destination.city} ({destination.code})
                   </option>

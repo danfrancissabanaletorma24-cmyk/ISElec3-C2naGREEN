@@ -1,7 +1,10 @@
 // src/public/PublicFooter.jsx
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Mail, Phone, Ship } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
+
+import { SITE } from '../config/site';
 
 export default function PublicFooter() {
   const { t } = useLanguage();
@@ -20,16 +23,16 @@ export default function PublicFooter() {
         <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">{t('help.title')}</p>
           <ul className="space-y-2 text-sm">
-            <li><a href="/#destinations" className="hover:text-white">{t('nav.destinations')}</a></li>
-            <li><a href="/#ships" className="hover:text-white">{t('nav.ships')}</a></li>
-            <li><a href="/#help" className="hover:text-white">{t('nav.help')}</a></li>
+            <li><Link to="/destinations" className="hover:text-white">{t('nav.destinations')}</Link></li>
+            <li><Link to="/ships" className="hover:text-white">{t('nav.ships')}</Link></li>
+            <li><Link to="/support" className="hover:text-white">{t('nav.help')}</Link></li>
           </ul>
         </div>
         <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">{t('help.contact')}</p>
           <ul className="space-y-2 text-sm">
-            <li className="flex items-center gap-2"><Mail className="h-4 w-4" /> support@layagexpres.com</li>
-            <li className="flex items-center gap-2"><Phone className="h-4 w-4" /> +63 (2) 8888-1234</li>
+            <li className="flex items-center gap-2"><Mail className="h-4 w-4" /> {SITE.supportEmail}</li>
+            {SITE.phone && <li className="flex items-center gap-2"><Phone className="h-4 w-4" /> {SITE.phone}</li>}
           </ul>
         </div>
       </div>

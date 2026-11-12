@@ -54,7 +54,7 @@ export default function RegisterPage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#EAF3FF] px-4 py-10 font-sans">
       <div className="absolute inset-0">
         <img
-          src="/supercat.jpg"
+          src="/ships/kho-fast-craft.jpg"
           alt="LayagExpress ferry"
           className="h-full w-full object-cover object-right"
           onError={(event) => { event.currentTarget.style.display = 'none'; }}
@@ -140,7 +140,7 @@ export default function RegisterPage() {
               aria-label={showPassword ? 'Hide password' : 'Show password'}
               className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600"
             >
-              {showPassword ? <Eye className="h-[18px] w-[18px]" /> : <EyeOff className="h-[18px] w-[18px]" />}
+              {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
             </button>
           </div>
           {errors.password && <p role="alert" className="text-xs font-medium text-red-600">{errors.password}</p>}

@@ -6,8 +6,8 @@ import { useLanguage } from './i18n/LanguageContext';
 import { PRESSABLE } from './components/motion';
 
 export default function LoginPage() {
-  const HERO_IMG = '/supercat.jpg';
-  const FALLBACK_IMG = 'https://images.unsplash.com/photo-1599827552599-eadf5f19bd4c?auto=format&fit=crop&w=1920&q=80';
+  const HERO_IMG = '/ships/kho-roro.jpg';
+  const FALLBACK_IMG = '/ships/montenegro-roro.jpg';
   const navigate = useNavigate();
   const { login } = useAuth();
   const { t } = useLanguage();
@@ -20,8 +20,8 @@ export default function LoginPage() {
     event.preventDefault();
     setError('');
     try {
-      await login('customer', email, password);
-      navigate('/dashboard');
+      const user = await login(email, password);
+      navigate(user.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
     } catch (loginError) {
       setError(loginError.message);
     }
@@ -116,7 +116,7 @@ export default function LoginPage() {
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600"
                 >
-                  {showPassword ? <Eye className="h-[18px] w-[18px]" /> : <EyeOff className="h-[18px] w-[18px]" />}
+                  {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
                 </button>
               </div>
 
@@ -142,7 +142,6 @@ export default function LoginPage() {
               {error && (
                 <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>
               )}
-
               <button
                 type="submit"
                 className={`w-full flex items-center justify-center gap-2 bg-[#0056D2] hover:bg-blue-800 text-white font-semibold py-3 rounded-xl text-[14px] shadow-md mt-2 ${PRESSABLE} group`}

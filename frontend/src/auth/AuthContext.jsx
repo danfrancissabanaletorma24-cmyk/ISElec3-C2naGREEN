@@ -1,68 +1,29 @@
 // src/auth/AuthContext.jsx
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { apiRequest } from '../api';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { apiRequest, setUnauthorizedHandler } from '../api';
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = 'travezia_auth';
-const USERS_KEY = 'layagexpres_users';
-
-export const ADMIN_DEMO = {
-  email: 'admin@layagexpres.com',
-  password: 'admin123',
-};
-
-const _DEMO_PASSWORD = 'demo1234';
-
-const DEMO_USERS = {
-  admin: {
-    name: 'Kerwin Tagle',
-    email: ADMIN_DEMO.email,
-    role: 'admin',
-    title: 'Administrator',
-    avatar: 'https://i.pravatar.cc/150?img=11',
-  },
-  customer: {
-    name: 'Kerwin Tagle',
-    email: 'kerwin.tagle@email.com',
-    role: 'customer',
-    title: 'Passenger',
-    avatar: 'https://i.pravatar.cc/150?img=11',
-  },
-};
 
 function readStoredSession() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const session = raw ? JSON.parse(raw) : null;
-    const isLegacyCustomerSession = session?.role === 'customer'
-      && !session.token
-      && session.user?.email?.toLowerCase() !== DEMO_USERS.customer.email;
-    return isLegacyCustomerSession ? null : session;
+    return session?.token ? session : null;
   } catch {
     return null;
   }
 }
 
-export function readRegisteredUsers() {
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function writeRegisteredUsers(users) {
-  try {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  } catch {
-    /* storage unavailable — keep in-memory session only */
-  }
-}
+const normalizeUser = (user) => ({
+  ...user,
+  role: user.role === 'admin' ? 'admin' : 'customer',
+});
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(readStoredSession);
+  // Track loading state: true initially if we have a token to verify
+  const [loading, setLoading] = useState(() => Boolean(readStoredSession()?.token));
 
   useEffect(() => {
     if (session) {
@@ -72,27 +33,50 @@ export function AuthProvider({ children }) {
     }
   }, [session]);
 
-  const login = async (role, email, password) => {
-    const normalized = (email || '').trim().toLowerCase();
+  const logout = useCallback(() => setSession(null), []);
 
-    if (role === 'customer') {
-      const result = await apiRequest('/auth/login', {
-        method: 'POST',
-        body: { email: normalized, password },
+  useEffect(() => {
+    setUnauthorizedHandler(logout);
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
+
+  const token = session?.token;
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      return undefined;
+    }
+    let active = true;
+    apiRequest('/auth/me', { token })
+      .then((user) => {
+        if (active) {
+          const normalizedUser = normalizeUser(user);
+          setSession((current) => current && {
+            ...current,
+            role: normalizedUser.role,
+            user: normalizedUser,
+          });
+        }
+      })
+      .catch(() => { /* 401 handled by unauthorized handler */ })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-      const user = { ...result.user, role: 'customer' };
-      setSession({ role: 'customer', user, token: result.token });
-      return user;
-    }
+    return () => { active = false; };
+  }, [token]);
 
-    if (role === 'admin' && password !== undefined && password !== ADMIN_DEMO.password) {
-      throw new Error('Incorrect administrator password.');
-    }
-
-    const base = DEMO_USERS[role] ?? DEMO_USERS.customer;
-    const user = { ...base, email: normalized || base.email };
-    setSession({ role: user.role, user });
+  const authenticate = async (path, email, password) => {
+    const result = await apiRequest(path, {
+      method: 'POST',
+      body: { email: (email || '').trim().toLowerCase(), password },
+    });
+    const user = normalizeUser(result.user);
+    setSession({ role: user.role, user, token: result.token });
     return user;
+  };
+
+  const login = async (email, password) => {
+    return authenticate('/auth/login', email, password);
   };
 
   const register = async ({ name, email, mobile, password }) => {
@@ -100,50 +84,34 @@ export function AuthProvider({ children }) {
       method: 'POST',
       body: { name: name.trim(), email: email.trim().toLowerCase(), mobile: mobile.trim(), password },
     });
-    const user = { ...result.user, role: 'customer' };
-    setSession({ role: 'customer', user, token: result.token });
+    const user = normalizeUser(result.user);
+    setSession({ role: user.role, user, token: result.token });
     return user;
   };
 
   const updateUser = async (patch) => {
     if (!session?.token) throw new Error('You must be signed in to update your profile.');
-    const backendPatch = { ...patch };
-    if (patch.name) {
-      const [firstName, ...lastName] = patch.name.trim().split(/\s+/);
-      backendPatch.firstName = firstName;
-      backendPatch.lastName = lastName.join(' ');
-      delete backendPatch.name;
-    }
-    if (patch.mobile) {
-      backendPatch.contactNumber = patch.mobile;
-      delete backendPatch.mobile;
-    }
-    const user = await apiRequest('/auth/me', {
-      token: session.token,
-      method: 'PUT',
-      body: backendPatch,
-    });
-    const nextUser = { ...user, role: 'customer' };
-    setSession((current) => current && ({ ...current, user: nextUser }));
+    const user = await apiRequest('/auth/me', { token: session.token, method: 'PUT', body: patch });
+    const nextUser = normalizeUser(user);
+    setSession((current) => current && { ...current, user: nextUser });
     return nextUser;
   };
 
-  const changePassword = async (currentPassword, nextPassword) => {
+  const changePassword = async (currentPassword, newPassword) => {
     if (!session?.token) throw new Error('You must be signed in.');
     await apiRequest('/auth/change-password', {
       token: session.token,
       method: 'PUT',
-      body: { currentPassword, newPassword: nextPassword },
+      body: { currentPassword, newPassword },
     });
   };
-
-  const logout = () => setSession(null);
 
   const value = {
     role: session?.role ?? null,
     user: session?.user ?? null,
     token: session?.token ?? null,
     isAuthenticated: Boolean(session),
+    loading,
     login,
     register,
     updateUser,

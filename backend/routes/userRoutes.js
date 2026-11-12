@@ -1,11 +1,10 @@
-const express = require('express');
-const router = express.Router();
-const { createUser, getUsers } = require('../controllers/userController');
+const router = require('express').Router();
+const c = require('../controllers/userController');
+const { protect, adminOnly } = require('../middleware/auth');
 
-// GET all users -> /api/users
-router.get('/', getUsers);
-
-// POST a new user -> /api/users
-router.post('/', createUser);
+router.use(protect, adminOnly);
+router.route('/').get(c.getAll).post(c.create);
+router.put('/:id/reset-password', c.resetPassword);
+router.route('/:id').get(c.getOne).put(c.update).delete(c.remove);
 
 module.exports = router;

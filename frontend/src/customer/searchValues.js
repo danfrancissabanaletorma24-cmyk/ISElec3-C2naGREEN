@@ -6,13 +6,13 @@ const inDays = (days) => toISODate(new Date(Date.now() + days * DAY));
 export function defaultSearchValues() {
   return {
     tripType: 'one-way',
-    from: 'MNL',
-    to: 'CEB',
-    date: inDays(7),
-    returnDate: inDays(14),
-    legFrom: 'CEB',
-    legTo: 'TAG',
-    legDate: inDays(14),
+    from: '',
+    to: '',
+    date: inDays(1),
+    returnDate: inDays(3),
+    legFrom: '',
+    legTo: '',
+    legDate: inDays(3),
     adults: 1,
     children: 0,
     infants: 0,
@@ -73,6 +73,5 @@ export function passengerSummary(values) {
   if (values.adults > 0) parts.push(`${values.adults} Adult${values.adults > 1 ? 's' : ''}`);
   if (values.children > 0) parts.push(`${values.children} Child${values.children > 1 ? 'ren' : ''}`);
   if (values.seniors > 0) parts.push(`${values.seniors} Senior${values.seniors > 1 ? 's' : ''}`);
-  if (values.infants > 0) parts.push(`${values.infants} Infant${values.infants > 1 ? 's' : ''}`);
   return parts.join(', ');
 }

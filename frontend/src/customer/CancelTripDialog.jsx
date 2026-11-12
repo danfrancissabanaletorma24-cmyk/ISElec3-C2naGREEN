@@ -7,6 +7,7 @@ const CANCEL_REASONS = [
   'Change of plans',
   'Found another trip',
   'Emergency',
+  'Trip was cancelled by the operator',
   'Other',
 ];
 
@@ -81,7 +82,7 @@ export default function CancelTripDialog({ ticket, open, onClose, onConfirm }) {
             </div>
             <div className="mt-2 flex items-center justify-between gap-4">
               <span className="text-slate-500">Seats</span>
-              <span className="font-semibold text-slate-900">{ticket.seats.join(', ')}</span>
+              <span className="font-semibold text-slate-900">{ticket.seats.length ? ticket.seats.join(', ') : ticket.passenger}</span>
             </div>
             <div className="mt-2 flex items-center justify-between gap-4">
               <span className="text-slate-500">Booking Ref</span>
@@ -121,8 +122,8 @@ export default function CancelTripDialog({ ticket, open, onClose, onConfirm }) {
           <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <p>
-              Free cancellation up to 24 hours before departure. Approved refunds are
-              processed within 5–7 business days.
+              You can cancel up to 4 hours before departure. If you already paid, your refund
+              is processed by the operator after cancellation.
             </p>
           </div>
         </div>
