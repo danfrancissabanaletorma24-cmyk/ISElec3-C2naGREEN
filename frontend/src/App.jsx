@@ -28,6 +28,14 @@ import ProfilePage from './ProfilePage';
 import AccountSettingsPage from './AccountSettingsPage';
 
 import PageTransition from './components/PageTransition';
+import AdminLayout from './admin/AdminLayout';
+import AdminDashboardPage from './admin/AdminDashboardPage';
+import AdminBookingsPage from './admin/AdminBookingsPage';
+import AdminVesselsPage from './admin/AdminVesselsPage';
+import AdminFleetMapPage from './admin/AdminFleetMapPage';
+import AdminUsersPage from './admin/AdminUsersPage';
+import AdminReportsPage from './admin/AdminReportsPage';
+import AdminSettingsPage from './admin/AdminSettingsPage';
 
 function App() {
   return (
@@ -45,7 +53,21 @@ function App() {
                   <Route path="/destinations" element={<DestinationsPage />} />
                   <Route path="/ships" element={<ShipsPage />} />
                   <Route path="/support" element={<SupportPage />} />
+                  <Route path="/admin/login" element={<Navigate to="/login" replace />} />
 
+                  {/* Admin area (requires an administrator account) */}
+                  <Route element={<ProtectedRoute role="admin" />}>
+                    <Route path="/admin" element={<AdminLayout />}>
+                      <Route index element={<AdminDashboardPage />} />
+                      <Route path="bookings" element={<AdminBookingsPage />} />
+                      <Route path="vessels" element={<AdminVesselsPage />} />
+                      <Route path="map" element={<AdminFleetMapPage />} />
+                      <Route path="users" element={<AdminUsersPage />} />
+                      <Route path="passengers" element={<AdminUsersPage />} />
+                      <Route path="reports" element={<AdminReportsPage />} />
+                      <Route path="settings" element={<AdminSettingsPage />} />
+                    </Route>
+                  </Route>
 
                   {/* User area (requires login) */}
                   <Route element={<ProtectedRoute />}>
