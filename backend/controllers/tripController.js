@@ -114,14 +114,15 @@ exports.getTrips = asyncHandler(async (req, res) => {
     const plain = trip.toObject();
     const taken = heldByTrip.get(String(trip._id)) || new Set();
     const byClass = {};
-    (trip.boat.seats || []).forEach((s) => {
+    const boatSeats = trip.boat?.seats || []; // a trip can outlive its boat (deleted/retired) - never assume it is populated
+    boatSeats.forEach((s) => {
       if (!taken.has(s.seatNumber)) byClass[s.seatClass] = (byClass[s.seatClass] || 0) + 1;
     });
-    plain.seatsTotal = (trip.boat.seats || []).length;
+    plain.seatsTotal = boatSeats.length;
     plain.seatsAvailable = Object.values(byClass).reduce((a, b) => a + b, 0);
     plain.seatsAvailableByClass = byClass;
     plain.cargoAvailableKg = Math.max(trip.cargoCapacityKg - (cargoByTrip.get(String(trip._id)) || 0), 0);
-    delete plain.boat.seats; // the seat map is loaded per trip from /api/trips/:id/seats
+    if (plain.boat) delete plain.boat.seats; // the seat map is loaded per trip from /api/trips/:id/seats
     return plain;
   });
   res.json({ data, total, page, pages: Math.ceil(total / limit) });
@@ -142,6 +143,7 @@ exports.getSeats = asyncHandler(async (req, res) => {
   if (!trip) throw httpError(404, 'Trip not found');
 
   const taken = new Set(await Ticket.find({ trip: trip._id, holdsSeat: true }).distinct('seatNumber'));
+  if (!trip.boat) throw httpError(409, 'The boat for this trip is no longer available');
   const seats = trip.boat.seats.map((s) => ({
     seatNumber: s.seatNumber,
     seatClass: s.seatClass,

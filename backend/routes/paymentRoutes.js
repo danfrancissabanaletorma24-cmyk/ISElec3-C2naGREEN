@@ -8,6 +8,7 @@ router.get('/', adminOnly, c.getAllPayments);
 router.get('/:id', c.getPayment);
 router.post('/:id/pay-online', c.payOnline);
 router.patch('/:id/confirm', adminOnly, c.confirmPhysical);
+router.post('/:id/refund-request', c.requestRefund);
 router.patch('/:id/refund', adminOnly, c.markRefunded);
 
 module.exports = router;

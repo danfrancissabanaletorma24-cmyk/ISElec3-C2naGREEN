@@ -17,11 +17,13 @@ const RESET = args.includes('--reset');
 const DAYS = Number((args.find((a) => a.startsWith('--days=')) || '').split('=')[1]) || 30;
 
 // ---------------------------------------------------------------- ports
+// Coordinates sit ON the coastline of each port town (checked against the Masbate / Albay / Sorsogon coast outlines),
+// so the port markers on the maps are on the shore and the sea routes start in the water. Re-run `npm run seed` to apply.
 const PORTS = [
-  { code: 'MBO', name: 'Mobo Port', city: 'Mobo', province: 'Masbate', latitude: 12.3128, longitude: 123.6212 },
-  { code: 'MSB', name: 'Masbate City Port', city: 'Masbate City', province: 'Masbate', latitude: 12.3636, longitude: 123.6195 },
-  { code: 'PDU', name: 'Pio Duran Port', city: 'Pio Duran', province: 'Albay', latitude: 13.0486, longitude: 123.4569 },
-  { code: 'PLR', name: 'Pilar Port', city: 'Pilar', province: 'Sorsogon', latitude: 12.9217, longitude: 123.6769 },
+  { code: 'MBO', name: 'Mobo Port', city: 'Mobo', province: 'Masbate', latitude: 12.3479, longitude: 123.6453 },
+  { code: 'MSB', name: 'Masbate City Port', city: 'Masbate City', province: 'Masbate', latitude: 12.3663, longitude: 123.6337 },
+  { code: 'PDU', name: 'Pio Duran Port', city: 'Pio Duran', province: 'Albay', latitude: 13.0272, longitude: 123.4476 },
+  { code: 'PLR', name: 'Pilar Port', city: 'Pilar', province: 'Sorsogon', latitude: 12.9224, longitude: 123.6771 },
 ];
 
 // ---------------------------------------------------------------- ships (pictures live in frontend/public/ships)
@@ -74,6 +76,8 @@ const SAILINGS = [
   // Kho - MV Esperanza Star (RoRo)
   { boat: 'esperanza', from: 'MBO', to: 'PDU', at: '05:00', minutes: 300, fares: { economy: 380, business: 560 }, cargo: 6 },
   { boat: 'esperanza', from: 'PDU', to: 'MBO', at: '12:00', minutes: 300, fares: { economy: 380, business: 560 }, cargo: 6 },
+  { boat: 'esperanza', from: 'MBO', to: 'PDU', at: '13:00', minutes: 300, fares: { economy: 380, business: 560 }, cargo: 6 },
+  { boat: 'esperanza', from: 'PDU', to: 'MBO', at: '18:00', minutes: 300, fares: { economy: 380, business: 560 }, cargo: 6 },
   // Kho - MV Ricardo 5 (fast craft)
   { boat: 'ricardo5', from: 'MBO', to: 'PLR', at: '07:00', minutes: 135, fares: { economy: 320, business: 450 }, cargo: 12 },
   { boat: 'ricardo5', from: 'PLR', to: 'MBO', at: '10:00', minutes: 135, fares: { economy: 320, business: 450 }, cargo: 12 },
@@ -83,13 +87,19 @@ const SAILINGS = [
   { boat: 'mobo', from: 'MBO', to: 'PDU', at: '20:00', minutes: 330, fares: { economy: 300 }, cargo: 5 },
   { boat: 'mobo', from: 'PDU', to: 'MBO', at: '04:00', minutes: 330, fares: { economy: 300 }, cargo: 5 },
   // Montenegro Lines - fast craft
+  { boat: 'mtl-fast', from: 'MSB', to: 'MBO', at: '09:30', minutes: 30, fares: { economy: 150 }, cargo: 5 },
+  { boat: 'mtl-fast', from: 'MBO', to: 'MSB', at: '10:30', minutes: 30, fares: { economy: 150 }, cargo: 5 },
+  { boat: 'mtl-fast', from: 'MSB', to: 'MBO', at: '15:00', minutes: 30, fares: { economy: 150 }, cargo: 5 },
+  { boat: 'mtl-fast', from: 'MBO', to: 'MSB', at: '16:00', minutes: 30, fares: { economy: 150 }, cargo: 5 },
   { boat: 'mtl-fast', from: 'MSB', to: 'PLR', at: '06:30', minutes: 105, fares: { economy: 350 }, cargo: 12 },
   { boat: 'mtl-fast', from: 'PLR', to: 'MSB', at: '09:00', minutes: 105, fares: { economy: 350 }, cargo: 12 },
   { boat: 'mtl-fast', from: 'MSB', to: 'PLR', at: '13:00', minutes: 105, fares: { economy: 350 }, cargo: 12 },
   { boat: 'mtl-fast', from: 'PLR', to: 'MSB', at: '15:30', minutes: 105, fares: { economy: 350 }, cargo: 12 },
   // Montenegro Lines - RoRo
   { boat: 'mtl-roro', from: 'MSB', to: 'PDU', at: '08:00', minutes: 240, fares: { economy: 400, business: 600 }, cargo: 6 },
+  { boat: 'mtl-roro', from: 'MSB', to: 'PDU', at: '16:00', minutes: 240, fares: { economy: 400, business: 600 }, cargo: 6 },
   { boat: 'mtl-roro', from: 'PDU', to: 'MSB', at: '14:00', minutes: 240, fares: { economy: 400, business: 600 }, cargo: 6 },
+  { boat: 'mtl-roro', from: 'PDU', to: 'MSB', at: '20:00', minutes: 240, fares: { economy: 400, business: 600 }, cargo: 6 },
 ];
 
 const toRad = (v) => (v * Math.PI) / 180;

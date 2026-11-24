@@ -36,8 +36,32 @@ export function getPortLabel(code) {
   return getDestination(code).city;
 }
 
-/** Route line between two ports (straight line - it is a schedule guide, not a navigation chart). */
+/**
+ * Sea lanes between the ports, as [lat, lng] waypoints that stay in open water.
+ * They were planned and checked against the real Masbate / Albay / Sorsogon coast outlines, so a line never
+ * crosses Ticao, Burias or the mainland - it goes around them. The ends are the port points on the shore.
+ * Each lane is listed once; the opposite direction is the same lane walked backwards.
+ */
+const SEA_LANES = {
+  'MBO-PDU': [[12.3479, 123.6453], [12.356, 123.654], [13.016, 123.444], [13.0272, 123.4476]],
+  'MBO-PLR': [[12.3479, 123.6453], [12.353, 123.648], [12.623, 123.579], [12.632, 123.573], [12.725, 123.582], [12.89, 123.669], [12.908, 123.666], [12.9224, 123.6771]],
+  'MBO-MSB': [[12.3479, 123.6453], [12.356, 123.654], [12.368, 123.648], [12.3663, 123.6337]],
+  'MSB-PLR': [[12.3663, 123.6337], [12.365, 123.642], [12.413, 123.645], [12.635, 123.573], [12.731, 123.585], [12.89, 123.669], [12.908, 123.666], [12.9224, 123.6771]],
+  'MSB-PDU': [[12.3663, 123.6337], [12.368, 123.648], [12.461, 123.642], [12.923, 123.444], [13.016, 123.444], [13.0272, 123.4476]],
+  'PDU-PLR': [[13.0272, 123.4476], [13.022, 123.444], [12.995, 123.462], [12.932, 123.525], [12.863, 123.654], [12.887, 123.669], [12.908, 123.666], [12.9224, 123.6771]],
+};
+
+/**
+ * Route line between two ports. Known ports follow their sea lane (water only, either direction).
+ * A port pair without a planned lane falls back to a straight line between the stored port coordinates.
+ */
 export function getRoutePath(from, to) {
+  const forward = SEA_LANES[`${from}-${to}`];
+  if (forward) return forward.map(([lat, lng]) => [lat, lng]);
+
+  const backward = SEA_LANES[`${to}-${from}`];
+  if (backward) return backward.map(([lat, lng]) => [lat, lng]).reverse();
+
   const origin = getPortCoordinate(from);
   const destination = getPortCoordinate(to);
   if (!origin || !destination) return [];

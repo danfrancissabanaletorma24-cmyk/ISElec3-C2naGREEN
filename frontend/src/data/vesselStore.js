@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { apiRequest } from '../api';
 
 const VESSEL_STORAGE_KEY = 'layagexpres_admin_vessels';
 const ROUTE_STORAGE_KEY = 'layagexpres_admin_routes';
@@ -146,4 +147,90 @@ export function deleteRoute(id) {
   saveList(ROUTE_STORAGE_KEY, routes);
   emit();
   return { ok: true };
+}
+
+// ---- Database sync -------------------------------------------------------------------------------
+// The boats saved in the database are the real fleet. The list kept in this browser (localStorage) is
+// only a cache, so every admin page rebuilds it from /boats (+ the next upcoming trip of each boat
+// for its route and seats sold). Vessels added from anywhere therefore always show up.
+const BOAT_TYPE_LABELS = { fastcraft: 'Fast Craft', roro: 'RoRo / Ferry', ferry: 'RoRo / Ferry', cargo: 'Cargo' };
+const BOAT_STATUS_LABELS = { active: 'Active', maintenance: 'Maintenance', retired: 'Retired' };
+
+export const DEFAULT_VESSEL_IMAGES = {
+  'Fast Craft': '/ships/kho-fast-craft.jpg',
+  'RoRo / Ferry': '/ships/kho-roro.jpg',
+  Cargo: '/ships/kho-cargo.png',
+};
+
+export const vesselImage = (vessel) => vessel?.image || DEFAULT_VESSEL_IMAGES[vessel?.type] || DEFAULT_VESSEL_IMAGES['Fast Craft'];
+
+const portName = (port) => port?.city || port?.name;
+const tripRouteLabel = (trip) => {
+  const origin = portName(trip?.route?.origin);
+  const destination = portName(trip?.route?.destination);
+  return origin && destination ? `${origin} → ${destination}` : '';
+};
+
+export function syncVesselsFromApi(boats, trips = []) {
+  const nextTripByBoat = new Map();
+  trips
+    .filter((trip) => trip?.boat && trip.status !== 'cancelled')
+    .sort((a, b) => new Date(a.departureAt) - new Date(b.departureAt))
+    .forEach((trip) => {
+      const boatId = String(trip.boat._id || trip.boat);
+      if (!nextTripByBoat.has(boatId)) nextTripByBoat.set(boatId, trip);
+    });
+
+  vessels = boats.map((boat) => {
+    const apiId = String(boat._id);
+    const existing = vessels.find((vessel) => vessel.apiId === apiId)
+      || vessels.find((vessel) => !vessel.apiId && vessel.name.toLowerCase() === String(boat.name).toLowerCase());
+    const seatCounts = (boat.seats || []).reduce((counts, seat) => {
+      counts[seat.seatClass] = (counts[seat.seatClass] || 0) + 1;
+      return counts;
+    }, {});
+    const capacity = boat.seatCapacity ?? (boat.seats || []).length;
+    const trip = nextTripByBoat.get(apiId);
+    const sold = trip ? Math.max((trip.seatsTotal ?? capacity) - (trip.seatsAvailable ?? capacity), 0) : 0;
+    const type = BOAT_TYPE_LABELS[boat.boatType] || 'Fast Craft';
+    return {
+      id: existing?.id || `VES-${apiId.slice(-6).toUpperCase()}`,
+      apiId,
+      name: boat.name,
+      type,
+      operator: boat.operator || '',
+      capacity,
+      economySeats: seatCounts.economy || 0,
+      businessSeats: seatCounts.business || 0,
+      vipSeats: seatCounts.vip || 0,
+      sold,
+      route: tripRouteLabel(trip) || existing?.route || 'No route assigned',
+      status: BOAT_STATUS_LABELS[boat.status] || 'Active',
+      image: boat.imageUrl || '',
+      defaultFares: {
+        economy: boat.defaultFares?.economy || boat.defaultFare || 0,
+        business: boat.defaultFares?.business || 0,
+        vip: boat.defaultFares?.vip || 0,
+      },
+    };
+  });
+  saveList(VESSEL_STORAGE_KEY, vessels);
+  emit();
+}
+
+let refreshing = null;
+/** Reloads the fleet from the database. Safe to call often; concurrent calls share one request. */
+export function refreshVessels(token) {
+  if (!token) return Promise.resolve();
+  if (refreshing) return refreshing;
+  refreshing = Promise.all([
+    apiRequest('/boats?limit=100&sort=name', { token }),
+    apiRequest('/trips?upcoming=true&limit=100', { token }).catch(() => ({ data: [] })),
+  ])
+    .then(([boats, trips]) => {
+      if (Array.isArray(boats?.data)) syncVesselsFromApi(boats.data, trips?.data || []);
+    })
+    .catch((error) => console.error('Could not refresh the fleet from the server.', error))
+    .finally(() => { refreshing = null; });
+  return refreshing;
 }

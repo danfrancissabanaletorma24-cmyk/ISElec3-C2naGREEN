@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Bell, Shield, Globe, Wallet, Armchair, CheckCircle2, User, ArrowRight,
+  Bell, Shield, Globe, Wallet, Armchair, CheckCircle2, User, ArrowRight, Eye, EyeOff,
 } from 'lucide-react';
 import CustomerSidebar from './customer/CustomerSidebar';
 import CustomerHeader from './customer/CustomerHeader';
@@ -16,7 +16,6 @@ import { useCurrency } from './currency/CurrencyContext';
 const CLASS_OPTIONS = [
   { id: 'economy', label: 'Economy' },
   { id: 'business', label: 'Business' },
-  { id: 'vip', label: 'VIP' },
 ];
 
 const inputClass = (invalid) => `w-full py-3 border rounded-xl text-sm font-medium outline-none transition-all ${
@@ -47,7 +46,7 @@ function Toggle({ checked, onChange, label }) {
 }
 
 export default function AccountSettingsPage() {
-  const { user, updateUser, changePassword } = useAuth();
+  const { user, updateUser, changePassword, resetPassword } = useAuth();
   const { t, language, setLanguage, languages } = useLanguage();
   const { currency, setCurrency, currencies } = useCurrency();
 
@@ -74,7 +73,9 @@ export default function AccountSettingsPage() {
   });
 
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' });
+  const [visiblePasswords, setVisiblePasswords] = useState({ current: false, next: false, confirm: false });
   const [passwordErrors, setPasswordErrors] = useState({});
+  const [passwordResetMode, setPasswordResetMode] = useState(false);
 
   const handleSavePreferences = async () => {
     try {
@@ -127,6 +128,32 @@ export default function AccountSettingsPage() {
     } catch (error) {
       setPasswordErrors({ current: error.message });
     }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    const next = {};
+    if (passwords.next.length < 8) next.next = 'Use at least 8 characters.';
+    if (passwords.next !== passwords.confirm) next.confirm = 'Passwords do not match.';
+    if (Object.keys(next).length > 0) {
+      setPasswordErrors(next);
+      return;
+    }
+    try {
+      await resetPassword(passwords.next);
+      setPasswords({ current: '', next: '', confirm: '' });
+      setPasswordErrors({});
+      setPasswordResetMode(false);
+      setToast('Password reset successfully.');
+    } catch (error) {
+      setPasswordErrors({ next: error.message });
+    }
+  };
+
+  const startPasswordReset = () => {
+    setPasswords({ current: '', next: '', confirm: '' });
+    setPasswordErrors({});
+    setPasswordResetMode(true);
   };
 
   return (
@@ -202,7 +229,7 @@ export default function AccountSettingsPage() {
                     <span className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-500">
                       <Armchair className="h-3.5 w-3.5" /> {t('prefs.class')}
                     </span>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {CLASS_OPTIONS.map((option) => (
                         <button
                           key={option.id}
@@ -239,60 +266,124 @@ export default function AccountSettingsPage() {
                   <Shield className="w-5 h-5 text-[#0056FF]" /> Security
                 </h2>
 
-                <form className="space-y-5" onSubmit={handleChangePassword} noValidate>
-                  <div>
-                    <label htmlFor="pw-current" className="block text-xs font-bold text-slate-500 mb-2">Current Password</label>
-                    <input
-                      id="pw-current"
-                      type="password"
-                      value={passwords.current}
-                      onChange={(event) => {
-                        setPasswords((current) => ({ ...current, current: event.target.value }));
-                        setPasswordErrors((current) => ({ ...current, current: undefined }));
-                      }}
-                      placeholder="••••••••"
-                      aria-invalid={Boolean(passwordErrors.current)}
-                      className={inputClass(passwordErrors.current)}
-                    />
-                    {passwordErrors.current && <p role="alert" className="mt-1 text-xs font-medium text-red-600">{passwordErrors.current}</p>}
-                  </div>
+                <form className="space-y-5" onSubmit={passwordResetMode ? handleResetPassword : handleChangePassword} noValidate>
+                  {passwordResetMode ? (
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                      You're signed in. Choose a new password below to reset it without your current password.
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label htmlFor="pw-current" className="block text-xs font-bold text-slate-500 mb-2">Current Password</label>
+                        <div className="relative">
+                          <input
+                            id="pw-current"
+                            type={visiblePasswords.current ? 'text' : 'password'}
+                            autoComplete="current-password"
+                            value={passwords.current}
+                            onChange={(event) => {
+                              setPasswords((current) => ({ ...current, current: event.target.value }));
+                              setPasswordErrors((current) => ({ ...current, current: undefined }));
+                            }}
+                            placeholder="••••••••"
+                            aria-invalid={Boolean(passwordErrors.current)}
+                            className={`${inputClass(passwordErrors.current)} pr-12`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setVisiblePasswords((current) => ({ ...current, current: !current.current }))}
+                            aria-label={`${visiblePasswords.current ? 'Hide' : 'Show'} current password`}
+                            className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                          >
+                            {visiblePasswords.current ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        {passwordErrors.current && <p role="alert" className="mt-1 text-xs font-medium text-red-600">{passwordErrors.current}</p>}
+                      </div>
+                      <p className="text-sm text-slate-500">
+                        Forgot your current password?{' '}
+                        <button
+                          type="button"
+                          onClick={startPasswordReset}
+                          className="font-semibold text-[#0056FF] hover:underline"
+                        >
+                          Reset it here
+                        </button>
+                      </p>
+                    </>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div>
                       <label htmlFor="pw-next" className="block text-xs font-bold text-slate-500 mb-2">New Password</label>
-                      <input
-                        id="pw-next"
-                        type="password"
-                        value={passwords.next}
-                        onChange={(event) => {
-                          setPasswords((current) => ({ ...current, next: event.target.value }));
-                          setPasswordErrors((current) => ({ ...current, next: undefined }));
-                        }}
-                        placeholder="••••••••"
-                        aria-invalid={Boolean(passwordErrors.next)}
-                        className={inputClass(passwordErrors.next)}
-                      />
+                      <div className="relative">
+                        <input
+                          id="pw-next"
+                          type={visiblePasswords.next ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          value={passwords.next}
+                          onChange={(event) => {
+                            setPasswords((current) => ({ ...current, next: event.target.value }));
+                            setPasswordErrors((current) => ({ ...current, next: undefined }));
+                          }}
+                          placeholder="••••••••"
+                          aria-invalid={Boolean(passwordErrors.next)}
+                          className={`${inputClass(passwordErrors.next)} pr-12`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setVisiblePasswords((current) => ({ ...current, next: !current.next }))}
+                          aria-label={`${visiblePasswords.next ? 'Hide' : 'Show'} new password`}
+                          className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                        >
+                          {visiblePasswords.next ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                       {passwordErrors.next && <p role="alert" className="mt-1 text-xs font-medium text-red-600">{passwordErrors.next}</p>}
                     </div>
                     <div>
                       <label htmlFor="pw-confirm" className="block text-xs font-bold text-slate-500 mb-2">Confirm New Password</label>
-                      <input
-                        id="pw-confirm"
-                        type="password"
-                        value={passwords.confirm}
-                        onChange={(event) => {
-                          setPasswords((current) => ({ ...current, confirm: event.target.value }));
-                          setPasswordErrors((current) => ({ ...current, confirm: undefined }));
-                        }}
-                        placeholder="••••••••"
-                        aria-invalid={Boolean(passwordErrors.confirm)}
-                        className={inputClass(passwordErrors.confirm)}
-                      />
+                      <div className="relative">
+                        <input
+                          id="pw-confirm"
+                          type={visiblePasswords.confirm ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          value={passwords.confirm}
+                          onChange={(event) => {
+                            setPasswords((current) => ({ ...current, confirm: event.target.value }));
+                            setPasswordErrors((current) => ({ ...current, confirm: undefined }));
+                          }}
+                          placeholder="••••••••"
+                          aria-invalid={Boolean(passwordErrors.confirm)}
+                          className={`${inputClass(passwordErrors.confirm)} pr-12`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setVisiblePasswords((current) => ({ ...current, confirm: !current.confirm }))}
+                          aria-label={`${visiblePasswords.confirm ? 'Hide' : 'Show'} confirmation password`}
+                          className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                        >
+                          {visiblePasswords.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                       {passwordErrors.confirm && <p role="alert" className="mt-1 text-xs font-medium text-red-600">{passwordErrors.confirm}</p>}
                     </div>
                   </div>
-                  <div className="pt-4 border-t border-slate-100 flex justify-end">
+                  <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
+                    {passwordResetMode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPasswordResetMode(false);
+                          setPasswords({ current: '', next: '', confirm: '' });
+                          setPasswordErrors({});
+                        }}
+                        className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                    )}
                     <button type="submit" className="bg-white border-2 border-[#0056FF] text-[#0056FF] hover:bg-blue-50 px-6 py-3 rounded-xl font-bold text-sm transition-colors">
-                      Update Password
+                      {passwordResetMode ? 'Reset Password' : 'Update Password'}
                     </button>
                   </div>
                 </form>

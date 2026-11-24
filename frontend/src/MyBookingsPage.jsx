@@ -17,6 +17,7 @@ const FILTERS = [
 ];
 
 export function statusBadge(booking) {
+  if (booking.refundStatus === 'refunded') return { label: 'Refunded', style: 'bg-emerald-100 text-emerald-700' };
   if (booking.status === 'cancelled') return { label: 'Cancelled', style: 'bg-red-100 text-red-700' };
   if (booking.needsReschedule) return { label: 'Trip cancelled by operator', style: 'bg-amber-100 text-amber-800' };
   if (booking.awaitingPayment) return { label: 'Awaiting payment', style: 'bg-amber-100 text-amber-800' };

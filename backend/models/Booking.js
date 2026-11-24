@@ -12,11 +12,13 @@ const bookingSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true, min: 0 },
     cancelledAt: Date,
     cancelReason: { type: String, trim: true },
+    cancelledBy: { type: String, enum: ['user', 'admin'] }, // who cancelled the booking
     rescheduleHistory: [
       {
         fromTrip: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip' },
         toTrip: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip' },
         reason: String,
+        by: { type: String, enum: ['user', 'admin'] }, // who moved the booking
         at: { type: Date, default: Date.now },
         _id: false,
       },

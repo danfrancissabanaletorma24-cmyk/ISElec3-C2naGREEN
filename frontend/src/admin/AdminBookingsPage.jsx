@@ -3,14 +3,26 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Filter, X, CalendarDays, Ship, MapPin, CreditCard,
   CheckCircle2, XCircle, RotateCcw, ChevronLeft, ChevronRight,
-  Armchair, CalendarClock,
+  Armchair, CalendarClock, Trash2,
 } from 'lucide-react';
 import { apiRequest } from '../api';
 import { currency } from '../data/adminData';
 import { loadAllAdminBookings } from './adminBookingData';
 import { useAuth } from '../auth/AuthContext';
 import RescheduleTripDialog from '../customer/RescheduleTripDialog';
+import RefundStatusCard from '../customer/RefundStatusCard';
+import Modal from '../customer/Modal';
+import Toast from '../customer/Toast';
 import StatusBadge from './components/StatusBadge';
+import { validateReason, cleanReasonText } from '../customer/reasons';
+
+const ADMIN_CANCEL_REASONS = ['Bad weather', 'Vessel maintenance', 'Schedule change by the operator', 'Duplicate booking', 'Other'];
+
+const whenText = (value) => (value
+  ? new Date(value).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+  : '');
+
+const REFUND_REQUESTS = 'Refund requests';
 
 const STATUS_TABS = [
   'All',
@@ -18,6 +30,7 @@ const STATUS_TABS = [
   'Confirmed',
   'Completed',
   'Cancelled',
+  REFUND_REQUESTS,
   'Refunded',
 ];
 
@@ -37,6 +50,16 @@ const SORTS = {
   amount: (a, b) => b.amount - a.amount,
 };
 
+// A booking can be deleted once it is cancelled or its refund was approved, and no refund is still waiting.
+const canDeleteBooking = (booking) => (
+  (
+    booking.status === 'Cancelled' &&
+    !['paid', 'refund_pending'].includes(booking.paymentStatus)
+  ) ||
+  booking.status === 'Completed' ||
+  booking.status === 'Refunded'
+);
+
 export default function AdminBookingsPage() {
   const { token } = useAuth();
 
@@ -49,9 +72,26 @@ export default function AdminBookingsPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
-  const [rescheduleNotice, setRescheduleNotice] = useState('');
+  const [notice, setRescheduleNotice] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState('');
   const [loadingProof, setLoadingProof] = useState(false);
+  // refund dialog: { booking, decision: 'approve' | 'reject' }
+  const [refundDialog, setRefundDialog] = useState(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundError, setRefundError] = useState('');
+  const [isRefunding, setIsRefunding] = useState(false);
+  // cancel dialog: the booking being cancelled by an admin (a valid reason is required)
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelChoice, setCancelChoice] = useState('');
+  const [cancelOther, setCancelOther] = useState('');
+  const [cancelError, setCancelError] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  // delete dialog: the booking being permanently deleted
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteToast, setDeleteToast] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -79,6 +119,7 @@ export default function AdminBookingsPage() {
   const counts = useMemo(() => {
     return Object.fromEntries([
       ['All', bookings.length],
+      [REFUND_REQUESTS, bookings.filter((booking) => booking.paymentStatus === 'refund_pending').length],
       ...SUMMARY_STATUSES.map((status) => [
         status,
         bookings.filter((booking) => (
@@ -98,9 +139,11 @@ export default function AdminBookingsPage() {
       .filter((booking) => (
         tab === 'All' ||
         (
-          tab === 'Refunded'
-            ? booking.paymentStatus === 'refunded'
-            : booking.status === tab
+          tab === REFUND_REQUESTS
+            ? booking.paymentStatus === 'refund_pending'
+            : tab === 'Refunded'
+              ? booking.paymentStatus === 'refunded'
+              : booking.status === tab
         )
       ))
       .filter((booking) => !term || booking.searchText.includes(term))
@@ -155,31 +198,144 @@ export default function AdminBookingsPage() {
           method: 'PATCH',
           body: {},
         });
-      } else if (status === 'Cancelled') {
-        await apiRequest(`/bookings/${booking.rawId}/cancel`, {
-          token,
-          method: 'PATCH',
-          body: {
-            reason: 'Cancelled by administrator',
-          },
-        });
-      } else if (status === 'Refunded') {
-        if (booking.paymentStatus !== 'refund_pending') {
-          throw new Error(
-            'This booking has no pending refund to process.'
-          );
-        }
-
-        await apiRequest(`/payments/${booking.paymentId}/refund`, {
-          token,
-          method: 'PATCH',
-          body: {},
-        });
       }
 
       await refreshBookings();
     } catch (error) {
       setActionError(error.message);
+    }
+  };
+
+  const openCancelDialog = (booking) => {
+    setCancelTarget(booking);
+    setCancelChoice('');
+    setCancelOther('');
+    setCancelError('');
+  };
+
+  const closeCancelDialog = () => {
+    if (isCancelling) return;
+    setCancelTarget(null);
+  };
+
+  // Cancel a booking as an administrator. The reason is saved and shown in the booking details and to the customer.
+  const submitCancel = async () => {
+    if (!cancelChoice) { setCancelError('Please choose a reason for cancelling.'); return; }
+    const reason = cancelChoice === 'Other' ? cleanReasonText(cancelOther) : cancelChoice;
+    const problem = validateReason(reason, 'reason for cancelling');
+    if (problem) { setCancelError(problem); return; }
+    setIsCancelling(true);
+    setCancelError('');
+    try {
+      await apiRequest(`/bookings/${cancelTarget.rawId}/cancel`, { token, method: 'PATCH', body: { reason } });
+      setCancelTarget(null);
+      setActionError('');
+      await refreshBookings();
+    } catch (error) {
+      setCancelError(error.message || 'Could not cancel this booking.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const openDeleteDialog = (booking) => {
+    setDeleteTarget(booking);
+    setDeleteError('');
+  };
+
+  const closeDeleteDialog = () => {
+    if (isDeleting) return;
+    setDeleteTarget(null);
+    setDeleteError('');
+  };
+
+  // Permanently delete a cancelled or refunded booking and everything linked to it.
+  const submitDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await apiRequest(`/bookings/${encodeURIComponent(deleteTarget.rawId)}`, {
+        token,
+        method: 'DELETE',
+        body: {
+          bookingId: deleteTarget.rawId,
+          bookingReference: deleteTarget.bookingRef,
+        },
+      });
+      setBookings((current) => current.filter((item) => item.rawId !== deleteTarget.rawId));
+      if (selectedId === deleteTarget.id) setSelectedId(null);
+      setDeleteTarget(null);
+      setActionError('');
+      setNotice('Booking deleted.');
+      setDeleteToast(`Booking ${deleteTarget.bookingRef} was permanently deleted.`);
+      await refreshBookings();
+    } catch (error) {
+      setDeleteError(error.message || 'Could not delete this booking.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const openRefundDialog = (booking, decision) => {
+    setRefundDialog({ booking, decision });
+    setRefundReason('');
+    setRefundError('');
+    setActionNotice('');
+  };
+
+  const closeRefundDialog = () => {
+    if (isRefunding) return;
+    setRefundDialog(null);
+    setRefundReason('');
+    setRefundError('');
+  };
+
+  // Approve / reject a customer's refund request, or refund a paid booking directly. A reason is required.
+  const submitRefund = async () => {
+    const reason = refundReason.trim();
+    if (reason.length < 5) {
+      setRefundError('Please give a reason (at least 5 characters). The customer can read it.');
+      return;
+    }
+    setIsRefunding(true);
+    setRefundError('');
+    try {
+      const updatedPayment = await apiRequest(`/payments/${refundDialog.booking.paymentId}/refund`, {
+        token,
+        method: 'PATCH',
+        body: { reason, decision: refundDialog.decision },
+      });
+      if (refundDialog.decision === 'approve') {
+        setBookings((current) => current.map((item) => (
+          item.paymentId === refundDialog.booking.paymentId
+            ? {
+                ...item,
+                paymentStatus: 'refunded',
+                status: 'Refunded',
+                refunded: true,
+                refund: updatedPayment?.refund?.status
+                  ? updatedPayment.refund
+                  : { status: 'refunded' },
+              }
+            : item
+        )));
+      }
+      setRefundDialog(null);
+      setRefundReason('');
+      setActionError('');
+      setSelectedId(null);
+      setActionNotice(refundDialog.decision === 'reject'
+        ? 'Refund request declined. The customer was notified.'
+        : 'Refund successful. The customer was notified.');
+      setNotice(refundDialog.decision === 'reject'
+        ? 'Refund request declined. The customer was notified.'
+        : 'Refund successful. The customer was notified.');
+      await refreshBookings();
+    } catch (error) {
+      setRefundError(error.message || 'Could not process this refund.');
+    } finally {
+      setIsRefunding(false);
     }
   };
 
@@ -392,9 +548,9 @@ export default function AdminBookingsPage() {
         </div>
 
         {/* Table */}
-        {rescheduleNotice && (
+        {notice && (
           <p className="mx-5 mt-4 rounded-xl bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200 md:mx-6">
-            {rescheduleNotice}
+            {notice}
           </p>
         )}
 
@@ -473,7 +629,8 @@ export default function AdminBookingsPage() {
                     <div className="flex items-center justify-end gap-2">
 
                       {booking.status !== 'Cancelled' &&
-                        booking.status !== 'Completed' && (
+                        booking.status !== 'Completed' &&
+                        booking.status !== 'Refunded' && (
                           <button
                             onClick={() => {
                               setActionError('');
@@ -486,9 +643,23 @@ export default function AdminBookingsPage() {
                           </button>
                         )}
 
+                      {canDeleteBooking(booking) && (
+                        <button
+                          onClick={() => {
+                            setActionError('');
+                            openDeleteDialog(booking);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      )}
+
                       <button
                         onClick={() => {
                           setActionError('');
+                          setActionNotice('');
                           setSelectedId(booking.id);
                         }}
                         className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#0056FF] transition-colors hover:border-[#0056FF]/40 hover:bg-blue-50"
@@ -697,6 +868,39 @@ export default function AdminBookingsPage() {
                 </span>
               </div>
 
+              {(selected.status === 'Cancelled' || selected.status === 'Refunded' || selected.status === 'Reschedule pending' || selected.rescheduleHistory.length > 0) && (
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+                  {(selected.status === 'Cancelled' || selected.status === 'Refunded') && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Cancelled by {selected.cancelledBy === 'admin' ? 'administrator' : selected.cancelledBy === 'user' ? 'customer' : 'the system'}
+                        {selected.cancelledAt ? ` · ${whenText(selected.cancelledAt)}` : ''}
+                      </p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-slate-700">{selected.cancelReason || 'No reason was recorded for this older cancellation.'}</p>
+                    </div>
+                  )}
+                  {selected.tripCancelReason && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Trip cancelled by the operator</p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-slate-700">{selected.tripCancelReason}</p>
+                    </div>
+                  )}
+                  {selected.rescheduleHistory.map((item, index) => (
+                    <div key={index}>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Rescheduled by {item.by === 'admin' ? 'administrator' : 'customer'}{item.at ? ` · ${whenText(item.at)}` : ''}
+                      </p>
+                      {item.fromAt && item.toAt && (
+                        <p className="mt-0.5 text-xs text-slate-500">{whenText(item.fromAt)} → {whenText(item.toAt)}</p>
+                      )}
+                      <p className="mt-0.5 whitespace-pre-wrap text-slate-700">{item.reason || 'No reason given.'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <RefundStatusCard refund={selected.refund} />
+
               {/* Action error */}
               {actionError && (
                 <p
@@ -707,11 +911,21 @@ export default function AdminBookingsPage() {
                 </p>
               )}
 
+              {actionNotice && (
+                <p
+                  role="status"
+                  className="rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-700"
+                >
+                  {actionNotice}
+                </p>
+              )}
+
               {/* Booking actions */}
               <div className="flex flex-col gap-2 sm:flex-row">
 
                 {selected.status !== 'Cancelled' &&
-                  selected.status !== 'Completed' && (
+                  selected.status !== 'Completed' &&
+                  selected.status !== 'Refunded' && (
                     <button
                       onClick={() => setRescheduleTarget(selected.rescheduleTrip)}
                       className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 py-2.5 text-sm font-semibold text-[#0056FF] transition-colors hover:bg-blue-50"
@@ -742,9 +956,10 @@ export default function AdminBookingsPage() {
                   )}
 
                 {selected.status !== 'Cancelled' &&
-                  selected.status !== 'Completed' && (
+                  selected.status !== 'Completed' &&
+                  selected.status !== 'Refunded' && (
                     <button
-                      onClick={() => updateStatus(selected.id, 'Cancelled')}
+                      onClick={() => openCancelDialog(selected)}
                       className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
                     >
                       <XCircle className="h-4 w-4" />
@@ -752,13 +967,55 @@ export default function AdminBookingsPage() {
                     </button>
                   )}
 
+                {/* Refunds: approve a request, decline it, or refund a paid booking directly. */}
                 {selected.paymentStatus === 'refund_pending' && (
                   <button
-                    onClick={() => updateStatus(selected.id, 'Refunded')}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                    onClick={() => openRefundDialog(selected, 'approve')}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    Refund
+                    Approve refund
+                  </button>
+                )}
+                {selected.paymentStatus === 'refund_pending' &&
+                  selected.refund?.status === 'requested' && (
+                    <button
+                      onClick={() => openRefundDialog(selected, 'reject')}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
+                    >
+                      <XCircle className="h-4 w-4" />
+                      Decline
+                    </button>
+                  )}
+                {selected.paymentStatus === 'paid' &&
+                  selected.status === 'Cancelled' && (
+                    <button
+                      onClick={() => openRefundDialog(selected, 'approve')}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Approve refund
+                    </button>
+                  )}
+                {selected.paymentStatus === 'paid' &&
+                  selected.status !== 'Completed' &&
+                  selected.status !== 'Cancelled' && (
+                    <button
+                      onClick={() => openRefundDialog(selected, 'approve')}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Refund
+                    </button>
+                  )}
+
+                {canDeleteBooking(selected) && (
+                  <button
+                    onClick={() => openDeleteDialog(selected)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
                   </button>
                 )}
               </div>
@@ -767,9 +1024,132 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
+      {/* Refund dialog */}
+      <Modal
+        open={Boolean(refundDialog)}
+        onClose={closeRefundDialog}
+        title={refundDialog?.decision === 'reject' ? 'Decline refund request' : 'Refund this booking'}
+        description={refundDialog ? `${refundDialog.booking.bookingRef} · ${currency(refundDialog.booking.amount)}` : ''}
+        maxWidth="max-w-lg"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={closeRefundDialog}
+              className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={submitRefund}
+              disabled={isRefunding}
+              className={`rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                refundDialog?.decision === 'reject' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
+            >
+              {isRefunding ? 'Saving…' : refundDialog?.decision === 'reject' ? 'Decline request' : 'Confirm refund'}
+            </button>
+          </>
+        )}
+      >
+        {refundDialog && (
+          <div className="space-y-4">
+            {refundDialog.booking.refund?.reason && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  {refundDialog.booking.refund.requestedBy === 'admin' ? "Admin's" : "Customer's"} reason
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-slate-700">{refundDialog.booking.refund.reason}</p>
+              </div>
+            )}
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold text-slate-600">
+                {refundDialog.decision === 'reject' ? 'Reason for declining (required)' : 'Reason for the refund (required)'}
+              </span>
+              <textarea
+                value={refundReason}
+                onChange={(event) => { setRefundReason(event.target.value.slice(0, 500)); setRefundError(''); }}
+                rows={4}
+                placeholder={refundDialog.decision === 'reject' ? 'Explain why this request cannot be refunded…' : 'e.g. Trip cancelled due to bad weather…'}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20"
+              />
+              {refundError && <span role="alert" className="mt-1 block text-xs font-medium text-red-600">{refundError}</span>}
+            </label>
+            {refundDialog.decision !== 'reject' && (
+              <p className="text-xs text-slate-500">
+                The booking will be cancelled, its seats released, and the customer will see your reason.
+              </p>
+            )}
+            {refundDialog.decision === 'reject' && (
+              <p className="text-xs text-slate-500">
+                If the booking was already cancelled, declining reopens it and re-holds its seats. This is blocked if the trip already departed or the seats were taken.
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Cancel dialog */}
+      <Modal
+        open={Boolean(cancelTarget)}
+        onClose={closeCancelDialog}
+        title="Cancel this booking"
+        description={cancelTarget ? `${cancelTarget.bookingRef} · ${cancelTarget.passenger}` : ''}
+        maxWidth="max-w-lg"
+        footer={(
+          <>
+            <button type="button" onClick={closeCancelDialog} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">Back</button>
+            <button type="button" onClick={submitCancel} disabled={isCancelling} className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60">
+              {isCancelling ? 'Cancelling…' : 'Cancel booking'}
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-slate-600">Reason (required, the customer can read it)</span>
+            <select value={cancelChoice} onChange={(event) => { setCancelChoice(event.target.value); setCancelError(''); }} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20">
+              <option value="">Select a reason…</option>
+              {ADMIN_CANCEL_REASONS.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            {cancelChoice === 'Other' && (
+              <textarea value={cancelOther} onChange={(event) => { setCancelOther(event.target.value.slice(0, 300)); setCancelError(''); }} rows={3} placeholder="Explain why this booking is cancelled…" className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20" />
+            )}
+            {cancelError && <span role="alert" className="mt-1 block text-xs font-medium text-red-600">{cancelError}</span>}
+          </label>
+          <p className="text-xs text-slate-500">Seats are released. If the booking was paid, a refund is opened for it.</p>
+        </div>
+      </Modal>
+
+      {/* Delete dialog */}
+      <Modal
+        open={Boolean(deleteTarget)}
+        onClose={closeDeleteDialog}
+        title="Delete this booking?"
+        description={deleteTarget ? `${deleteTarget.bookingRef} · ${deleteTarget.passenger}` : ''}
+        maxWidth="max-w-md"
+        footer={(
+          <>
+            <button type="button" onClick={closeDeleteDialog} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={submitDelete} disabled={isDeleting} className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60">
+              {isDeleting ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-3 text-sm">
+          <p className="font-semibold text-slate-900">Are you sure you want to delete this? It cannot be restored.</p>
+          <p className="text-slate-600">This also removes its tickets, payment and invoice records.</p>
+          {deleteError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{deleteError}</p>}
+        </div>
+      </Modal>
+      <Toast message={deleteToast} onClose={() => setDeleteToast('')} />
+
       {/* Reschedule dialog */}
       {rescheduleTarget && (
         <RescheduleTripDialog
+          asAdmin
           trip={rescheduleTarget}
           open
           onClose={() => setRescheduleTarget(null)}

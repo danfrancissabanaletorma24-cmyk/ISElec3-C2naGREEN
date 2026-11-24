@@ -70,6 +70,7 @@ export function AuthProvider({ children }) {
       method: 'POST',
       body: { email: (email || '').trim().toLowerCase(), password },
     });
+    if (result.requiresMfa) return result;
     const user = normalizeUser(result.user);
     setSession({ role: user.role, user, token: result.token });
     return user;
@@ -77,6 +78,16 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     return authenticate('/auth/login', email, password);
+  };
+
+  const verifyMfa = async (challengeToken, code) => {
+    const result = await apiRequest('/auth/verify-mfa', {
+      method: 'POST',
+      body: { challengeToken, code },
+    });
+    const user = normalizeUser(result.user);
+    setSession({ role: user.role, user, token: result.token });
+    return user;
   };
 
   const register = async ({ name, email, mobile, password }) => {
@@ -106,16 +117,27 @@ export function AuthProvider({ children }) {
     });
   };
 
+  const resetPassword = async (newPassword) => {
+    if (!session?.token) throw new Error('You must be signed in.');
+    await apiRequest('/auth/reset-password', {
+      token: session.token,
+      method: 'PUT',
+      body: { newPassword },
+    });
+  };
+
   const value = {
     role: session?.role ?? null,
     user: session?.user ?? null,
     token: session?.token ?? null,
     isAuthenticated: Boolean(session),
-    loading,
+    loading, 
     login,
+    verifyMfa,
     register,
     updateUser,
     changePassword,
+    resetPassword,
     logout,
   };
 

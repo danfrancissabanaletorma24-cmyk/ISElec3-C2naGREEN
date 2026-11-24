@@ -153,34 +153,48 @@ export default function CustomerHeader({ title, subtitle, onOpenMenu }) {
                     const Icon = notification.icon;
                     return (
                       <li key={notification.id}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => handleReadNotification(notification.id)}
-                          className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${
-                            notification.read ? 'opacity-70' : ''
-                          }`}
-                        >
-                          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#0056FF]">
-                            <Icon className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-slate-800">
-                                {notification.title}
+                        <div className={`flex items-start gap-2 px-4 py-3 transition-colors hover:bg-slate-50 ${
+                          notification.read ? 'opacity-70' : ''
+                        }`}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => handleReadNotification(notification.id)}
+                            className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                          >
+                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#0056FF]">
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-800">
+                                  {notification.title}
+                                </span>
+                                {!notification.read && (
+                                  <span className="h-1.5 w-1.5 rounded-full bg-[#0056FF]" />
+                                )}
                               </span>
-                              {!notification.read && (
-                                <span className="h-1.5 w-1.5 rounded-full bg-[#0056FF]" />
-                              )}
+                              <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                                {notification.body}
+                              </span>
+                              <span className="mt-1 block text-[10px] font-medium text-slate-400">
+                                {notification.time}
+                              </span>
                             </span>
-                            <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
-                              {notification.body}
-                            </span>
-                            <span className="mt-1 block text-[10px] font-medium text-slate-400">
-                              {notification.time}
-                            </span>
-                          </span>
-                        </button>
+                          </button>
+                          {notification.read ? (
+                            <span className="pt-1 text-[10px] font-semibold text-slate-400">Read</span>
+                          ) : (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => handleReadNotification(notification.id)}
+                              className="shrink-0 pt-1 text-[10px] font-semibold text-[#0056FF] hover:underline"
+                            >
+                              Mark as read
+                            </button>
+                          )}
+                        </div>
                       </li>
                     );
                   })}

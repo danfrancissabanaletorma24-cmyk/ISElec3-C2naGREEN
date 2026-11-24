@@ -20,12 +20,16 @@ import {
   updateRoute,
   deleteRoute,
   syncRoutesFromApi,
+  refreshVessels,
+  vesselImage,
+  DEFAULT_VESSEL_IMAGES,
 } from '../data/vesselStore';
 import StatusBadge from './components/StatusBadge';
 import ProgressBar from './components/ProgressBar';
 import Toast from '../customer/Toast';
 
-const VESSEL_TYPES = ['Fast Craft', 'RoRo / Ferry'];
+const VESSEL_TYPES = ['Fast Craft', 'RoRo / Ferry', 'Cargo'];
+const BOAT_TYPE_BY_LABEL = { 'Fast Craft': 'fastcraft', 'RoRo / Ferry': 'roro', Cargo: 'cargo' };
 const PORT_CODES = Object.keys(PORT_LABELS);
 const CUSTOM_PORT = '__custom__';
 const DELETE_REASONS = [
@@ -78,7 +82,7 @@ const boatApiPayload = (vessel, includeRegistration = false) => ({
   ...(includeRegistration
     ? { registrationNumber: `ADMIN-${Date.now()}-${Math.floor(Math.random() * 1000000)}` }
     : {}),
-  boatType: vessel.type === 'Fast Craft' ? 'fastcraft' : 'roro',
+  boatType: BOAT_TYPE_BY_LABEL[vessel.type] || 'roro',
   seatCounts: {
     economy: Number(vessel.economySeats ?? vessel.capacity),
     business: Number(vessel.businessSeats) || 0,
@@ -91,7 +95,7 @@ const boatApiPayload = (vessel, includeRegistration = false) => ({
     vip: Number(vessel.vipFare) || 0,
   },
   imageUrl: vessel.image || '',
-  status: vessel.status === 'Active' ? 'active' : 'maintenance',
+  status: vessel.status === 'Active' ? 'active' : vessel.status === 'Retired' ? 'retired' : 'maintenance',
 });
 
 export default function AdminVesselsPage() {
@@ -129,6 +133,8 @@ export default function AdminVesselsPage() {
   const scheduleList = useSchedules();
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
   const [scheduleToast, setScheduleToast] = useState('');
+
+  useEffect(() => { refreshVessels(token); }, [token]);
 
   useEffect(() => {
     let active = true;
@@ -393,6 +399,7 @@ export default function AdminVesselsPage() {
         });
         addVessel({ ...payload, sold: 0, apiId: createdBoat._id });
       }
+      await refreshVessels(token);
       closeVesselModal();
     } catch (saveError) {
       setError(saveError.message || 'Could not save this vessel.');
@@ -437,6 +444,7 @@ export default function AdminVesselsPage() {
         });
       }
       deleteVessel(deletingVessel.id, deleteReason);
+      await refreshVessels(token);
       closeDeleteVessel();
     } catch (deleteErrorResponse) {
       setDeleteError(deleteErrorResponse.message || 'Could not delete this vessel.');
@@ -653,7 +661,9 @@ export default function AdminVesselsPage() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-900">Fleet</h2>
-            <p className="text-xs text-slate-500">Capacity and live status per vessel</p>
+            <p className="text-xs text-slate-500">
+              {vessels.length} {vessels.length === 1 ? 'vessel' : 'vessels'} · capacity and live status per vessel
+            </p>
           </div>
           <button
             onClick={openAddVessel}
@@ -665,25 +675,33 @@ export default function AdminVesselsPage() {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {vessels.map((vessel) => {
-            const occupancy = Math.round((vessel.sold / vessel.capacity) * 100);
+            const occupancy = vessel.capacity ? Math.round((vessel.sold / vessel.capacity) * 100) : 0;
             return (
-              <div key={vessel.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+              <div key={vessel.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+                <div className="relative h-40 w-full bg-slate-100">
+                  <img
+                    src={vesselImage(vessel)}
+                    alt={vessel.name}
+                    loading="lazy"
+                    onError={(event) => {
+                      const fallback = DEFAULT_VESSEL_IMAGES[vessel.type] || DEFAULT_VESSEL_IMAGES['Fast Craft'];
+                      if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;
+                    }}
+                    className={`h-full w-full object-cover ${vessel.status === 'Maintenance' ? 'grayscale' : ''}`}
+                  />
+                  <div className="absolute left-3 top-3">
+                    <StatusBadge status={vessel.status} className="bg-white/95 shadow-sm" />
+                  </div>
+                </div>
+                <div className="p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-[#0056FF]">
-                      {vessel.image ? (
-                        <img src={vessel.image} alt="" className="h-11 w-11 rounded-xl object-cover" />
-                      ) : (
-                        <Ship className="h-5 w-5" />
-                      )}
-                    </div>
                     <div>
                       <p className="font-bold text-slate-900">{vessel.name}</p>
                       <p className="text-xs text-slate-500">{vessel.id} · {vessel.type}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <StatusBadge status={vessel.status} />
                     <button
                       type="button"
                       onClick={() => openEditVessel(vessel)}
@@ -720,7 +738,8 @@ export default function AdminVesselsPage() {
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
                   <span>{occupancy}% occupied</span>
-                  <span>{vessel.status === 'Maintenance' ? 'Out of service' : 'Sailing today'}</span>
+                  <span>{vessel.status === 'Maintenance' ? 'Out of service' : vessel.status === 'Retired' ? 'Retired' : 'Sailing today'}</span>
+                </div>
                 </div>
               </div>
             );
@@ -1035,6 +1054,7 @@ export default function AdminVesselsPage() {
                 >
                   <option>Active</option>
                   <option>Maintenance</option>
+                  <option>Retired</option>
                 </select>
                 <span className="mt-1.5 block text-[11px] text-slate-400">
                   Set to Maintenance to take the vessel out of service.

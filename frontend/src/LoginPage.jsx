@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Ship, User, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from 'lucide-react';
+import QRCode from 'qrcode';
 import { useAuth } from './auth/AuthContext';
 import { useLanguage } from './i18n/LanguageContext';
 import { PRESSABLE } from './components/motion';
@@ -9,22 +10,54 @@ export default function LoginPage() {
   const HERO_IMG = '/ships/kho-roro.jpg';
   const FALLBACK_IMG = '/ships/montenegro-roro.jpg';
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, verifyMfa } = useAuth();
   const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [challenge, setChallenge] = useState(null);
+  const [authenticatorCode, setAuthenticatorCode] = useState('');
+  const [qrCode, setQrCode] = useState('');
+
+  useEffect(() => {
+    if (!challenge?.otpauthUrl) {
+      setQrCode('');
+      return undefined;
+    }
+    let active = true;
+    QRCode.toDataURL(challenge.otpauthUrl, { width: 220, margin: 2 })
+      .then((dataUrl) => { if (active) setQrCode(dataUrl); })
+      .catch(() => { if (active) setError('Could not display the authenticator QR code. Please try logging in again.'); });
+    return () => { active = false; };
+  }, [challenge]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
     try {
-      const user = await login(email, password);
+      if (challenge) {
+        const user = await verifyMfa(challenge.challengeToken, authenticatorCode);
+        navigate(user.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
+        return;
+      }
+      const result = await login(email, password);
+      if (result.requiresMfa) {
+        setChallenge(result);
+        setAuthenticatorCode('');
+        return;
+      }
+      const user = result;
       navigate(user.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
     } catch (loginError) {
       setError(loginError.message);
     }
+  };
+
+  const restartLogin = () => {
+    setChallenge(null);
+    setAuthenticatorCode('');
+    setError('');
   };
 
   return (
@@ -79,65 +112,103 @@ export default function LoginPage() {
                 <Ship className="w-9 h-9 fill-current" />
                 <span className="text-[28px] font-bold tracking-tight">LayagExpress</span>
               </div>
-              <h2 className="text-[18px] font-bold text-[#0A2540] mb-1.5">{t('auth.welcome')}</h2>
-              <p className="text-[13px] text-slate-500">{t('auth.sub')}</p>
+              <h2 className="text-[18px] font-bold text-[#0A2540] mb-1.5">
+                {challenge ? (challenge.setupRequired ? 'Set up your Google Authenticator' : 'Two-Step Verification') : t('auth.welcome')}
+              </h2>
+              <p className="text-[13px] text-slate-500">
+                {challenge
+                  ? (challenge.setupRequired
+                    ? 'Scan this QR code with Google Authenticator, then enter the 6-digit code.'
+                    : 'Enter the 6-digit code from your Google Authenticator to continue.')
+                  : t('auth.sub')}
+              </p>
             </div>
 
             <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <User className="h-[18px] w-[18px] text-slate-400" />
-                </div>
-                <input
-                  type="text"
-                  value={email}
-                  onChange={(event) => { setEmail(event.target.value); setError(''); }}
-                  placeholder={t('auth.email')}
-                  aria-label={t('auth.email')}
-                  className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#0056D2] focus:ring-1 focus:ring-[#0056D2] text-[13px] text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
-                />
-              </div>
-
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Lock className="h-[18px] w-[18px] text-slate-400" />
-                </div>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(event) => { setPassword(event.target.value); setError(''); }}
-                  placeholder={t('auth.password')}
-                  aria-label={t('auth.password')}
-                  className="w-full pl-11 pr-11 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#0056D2] focus:ring-1 focus:ring-[#0056D2] text-[13px] text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600"
-                >
-                  {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between text-[13px] pt-1 pb-1">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <div className="relative flex items-center justify-center">
+              {challenge ? (
+                <>
+                  {challenge.setupRequired && (
+                    <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+                      {qrCode
+                        ? <img src={qrCode} alt="Google Authenticator setup QR code" className="h-[220px] w-[220px]" />
+                        : <div className="flex h-[220px] w-[220px] items-center justify-center text-sm text-slate-500">Preparing QR code…</div>}
+                      <p className="text-center text-xs text-slate-500">The code refreshes every 30 seconds.</p>
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={authenticatorCode}
+                    onChange={(event) => {
+                      setAuthenticatorCode(event.target.value.replace(/\D/g, '').slice(0, 6));
+                      setError('');
+                    }}
+                    placeholder="●●●●●●"
+                    aria-label="●●●●●●"
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#0056D2] focus:ring-1 focus:ring-[#0056D2] text-center text-lg tracking-[0.3em] text-slate-800 placeholder:text-sm placeholder:tracking-normal placeholder:text-slate-400 transition-all shadow-sm"
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <User className="h-[18px] w-[18px] text-slate-400" />
+                    </div>
                     <input
-                      type="checkbox"
-                      defaultChecked
-                      className="peer appearance-none w-[18px] h-[18px] border border-[#0056D2] rounded-[4px] checked:bg-[#0056D2] cursor-pointer transition-colors"
+                      type="text"
+                      value={email}
+                      onChange={(event) => { setEmail(event.target.value); setError(''); }}
+                      placeholder={t('auth.email')}
+                      aria-label={t('auth.email')}
+                      className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#0056D2] focus:ring-1 focus:ring-[#0056D2] text-[13px] text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
                     />
-                    <svg className="absolute w-3 h-3 text-white pointer-events-none" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M11.6666 3.5L5.24992 9.91667L2.33325 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
                   </div>
-                  <span className="text-slate-600 font-medium">{t('auth.remember')}</span>
-                </label>
-                <a href="#" className="text-[#0056D2] font-semibold hover:underline">
-                  {t('auth.forgot')}
-                </a>
-              </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-[18px] w-[18px] text-slate-400" />
+                    </div>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(event) => { setPassword(event.target.value); setError(''); }}
+                      placeholder={t('auth.password')}
+                      aria-label={t('auth.password')}
+                      className="w-full pl-11 pr-11 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#0056D2] focus:ring-1 focus:ring-[#0056D2] text-[13px] text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((current) => !current)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600"
+                    >
+                      {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[13px] pt-1 pb-1">
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <div className="relative flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          defaultChecked
+                          className="peer appearance-none w-[18px] h-[18px] border border-[#0056D2] rounded-[4px] checked:bg-[#0056D2] cursor-pointer transition-colors"
+                        />
+                        <svg className="absolute w-3 h-3 text-white pointer-events-none" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M11.6666 3.5L5.24992 9.91667L2.33325 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                      <span className="text-slate-600 font-medium">{t('auth.remember')}</span>
+                    </label>
+                    <a href="#" className="text-[#0056D2] font-semibold hover:underline">
+                      {t('auth.forgot')}
+                    </a>
+                  </div>
+                </>
+              )}
 
               {error && (
                 <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>
@@ -146,17 +217,23 @@ export default function LoginPage() {
                 type="submit"
                 className={`w-full flex items-center justify-center gap-2 bg-[#0056D2] hover:bg-blue-800 text-white font-semibold py-3 rounded-xl text-[14px] shadow-md mt-2 ${PRESSABLE} group`}
               >
-                {t('auth.login')} <ArrowRight className="w-[18px] h-[18px] transition-transform group-hover:translate-x-0.5" />
+                {challenge ? 'Verify and continue' : t('auth.login')}
+                <ArrowRight className="w-[18px] h-[18px] transition-transform group-hover:translate-x-0.5" />
               </button>
+              {challenge && (
+                <button type="button" onClick={restartLogin} className="w-full text-sm font-medium text-slate-500 hover:text-[#0056D2]">
+                  Use a different account
+                </button>
+              )}
             </form>
 
-            <div className="relative flex items-center py-6">
+            {!challenge && <div className="relative flex items-center py-6">
               <div className="flex-grow border-t border-slate-200"></div>
               <span className="flex-shrink-0 mx-4 text-slate-400 text-[13px]">{t('auth.or')}</span>
               <div className="flex-grow border-t border-slate-200"></div>
-            </div>
+            </div>}
 
-            <button
+            {!challenge && <button
               type="button"
               className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-3 rounded-xl transition-colors text-[13px] shadow-sm"
             >
@@ -167,12 +244,12 @@ export default function LoginPage() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               </svg>
               {t('auth.google')}
-            </button>
+            </button>}
 
-            <p className="text-center text-[13px] text-slate-500 mt-6">
+            {!challenge && <p className="text-center text-[13px] text-slate-500 mt-6">
               {t('auth.noAccount')}{' '}
               <Link to="/register" className="text-[#0056D2] font-semibold hover:underline">{t('auth.signup')}</Link>
-            </p>
+            </p>}
 
           </div>
         </div>

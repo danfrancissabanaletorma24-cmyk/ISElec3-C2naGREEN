@@ -77,6 +77,9 @@ const userSchema = new mongoose.Schema(
     },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     isActive: { type: Boolean, default: true },
+    totpSecret: { type: String, select: false },
+    totpEnabled: { type: Boolean, default: false },
+    totpLastUsedStep: { type: Number, select: false },
   },
   { timestamps: true }
 );

@@ -8,6 +8,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) throw httpError(401, 'Not authorized, no token');
   const decoded = jwt.verify(header.split(' ')[1], process.env.JWT_SECRET);
+  if (decoded.purpose) throw httpError(401, 'Not authorized');
   const user = await User.findById(decoded.id);
   if (!user || !user.isActive) throw httpError(401, 'Account not found or deactivated');
   req.user = user;

@@ -16,7 +16,7 @@ Auth: send `Authorization: Bearer <token>` (token comes from a successful login)
 | | `GET /api/bookings` (all, filter/search) | 🛡️ |
 | Tickets | `GET /api/tickets/my?when=upcoming\|past`, `GET /:id` | 👤 |
 | | `GET /verify/:ticketNumber`, `PATCH /:id/board` | 🛡️ |
-| Payments | `GET /api/payments/my`, `GET /:id`, `POST /:id/pay-online` | 👤 |
+| Payments | `GET /api/payments/my`, `GET /:id`, `POST /:id/pay-online` (body `{ "verificationCode":"..." }` for card CVV or 4-digit wallet PIN; validated for format only in this simulated gateway and never stored) | 👤 |
 | | `GET /api/payments`, `PATCH /:id/confirm` (cash received), `PATCH /:id/refund` | 🛡️ |
 | Invoices | `GET /api/invoices/my`, `/booking/:bookingId`, `/:id` | 👤 |
 | Notifications | `GET /api/notifications/my`, `PATCH /read-all`, `PATCH /:id/read`, `DELETE /:id` | 👤 |
@@ -31,7 +31,7 @@ Add boat (seats auto-generated): `{ "name":"MV Sample","registrationNumber":"REG
 
 Add trip: `{ "boat":"<id>","route":"<id>","departureAt":"2026-11-05T08:00:00+08:00","arrivalAt":"2026-11-05T10:30:00+08:00","fares":{"economy":350,"business":600},"cargoRatePerKg":15 }`
 
-Save e-wallets on the signed-in profile with `PUT /api/auth/me`: `{ "preferences":{"wallets":[{"provider":"gcash","accountNumber":"09171234567"}]} }`. Supported providers are `gcash` and `maya`; do not send a wallet PIN or password. A saved wallet's ID can be passed as `payment.walletId` during booking, and only its last four digits are added to payment history.
+Save e-wallets on the signed-in profile with `PUT /api/auth/me`: `{ "preferences":{"wallets":[{"provider":"gcash","accountNumber":"09171234567"}]} }`. Supported providers are `gcash` and `maya`; never send or store a wallet PIN. The UI requests a PIN when adding a wallet and again when paying, but the simulated gateway only checks the format and does not verify the real PIN. A saved wallet's ID can be passed as `payment.walletId` during booking, and only its last four digits are added to payment history.
 
 Book passenger(s):
 ```json
@@ -48,7 +48,7 @@ Book cargo: `{ "tripId":"<id>","bookingType":"cargo","cargo":{"description":"Ric
 - **Bad weather / operator cancel:** admin calls `PATCH /api/trips/:id/cancel` with `{ "reason": "Bad weather" }`. Every pending/confirmed booking on that trip becomes `reschedule_pending` and the user is notified. The 4-hour rule does not apply to these bookings.
 - The user then either:
   - **Reschedules:** `GET /bookings/:id/reschedule-options` (same route, upcoming trips, shows if it fits), then `POST /bookings/:id/reschedule` with `{ "newTripId": "...", "seats": [{ "ticketId": "...", "seatNumber": "E10" }] }` (cargo: only `newTripId`). Passenger seats keep the same class and original price. Cargo bookings with an optional VIP seat keep the same seat number; it must be free and the new VIP fare cannot be higher than the original. Booking returns to `confirmed` if already paid, otherwise `pending`.
-  - **Cancels for a refund:** `PATCH /bookings/:id/cancel`.
+  - **Cancels for a refund:** `PATCH /bookings/:id/cancel` with `{ "reason": "..." }` (required, same rules). The booking stores `cancelReason` and `cancelledBy` (`user` | `admin`); a paid booking becomes `refund_pending`.
 
 ## Booking flow
 1. `GET /trips?origin&destination&date` -> pick trip -> `GET /trips/:id/seats`
@@ -62,7 +62,8 @@ Book cargo: `{ "tripId":"<id>","bookingType":"cargo","cargo":{"description":"Ric
 ## Added for the user side
 
 - `GET /api/trips` now also returns `seatsTotal`, `seatsAvailable`, `seatsAvailableByClass`, `cargoAvailableKg` per trip, accepts `boatType=roro|fastcraft|cargo|ferry`, and never lists sailings that already departed.
-- `GET /api/bookings/:id/reschedule-options?date=YYYY-MM-DD` - sailings on the same route the booking can move to. Works for operator-cancelled trips (`reschedule_pending`) **and** for the passenger's own request (`pending` / `confirmed`, at least 4 hours before departure).
-- `POST /api/bookings/:id/reschedule` body `{ newTripId, reason, seats: [{ ticketId, seatNumber }] }` - `reason` is required when the passenger moves the booking; the new fare must not be higher than what was paid and seats must be in the same class.
+- `GET /api/bookings/:id/reschedule-options[?date=YYYY-MM-DD]` - looks at the next 45 days on the same route and returns `availableDates` (only dates with a sailing that has room in the seat class the customer paid for) and `options` (the sailings, with `availableSeatsByClass`, `canAccommodate` and `unavailableReason`; filtered to `date` when given). Works for operator-cancelled trips (`reschedule_pending`) **and** for the passenger's own request (`pending` / `confirmed`, at least 4 hours before departure).
+- `POST /api/bookings/:id/reschedule` body `{ newTripId, reason, seats: [{ ticketId, seatNumber }] }` - `reason` is required (5-300 characters, in words) when the passenger or an admin moves the booking; the new fare must not be higher than what was paid and seats must be in the same class.
 - `GET/PUT /api/auth/me`, `PUT /api/auth/change-password`.
 - Boats have `operator`, `logoUrl`, `description`; ports have `latitude`, `longitude`; boat type `cargo` was added.
+

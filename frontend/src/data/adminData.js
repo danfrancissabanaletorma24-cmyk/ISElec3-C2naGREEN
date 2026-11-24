@@ -4,10 +4,11 @@ export const statusStyles = {
   'Reschedule pending': 'bg-blue-50 text-blue-700 ring-blue-200',
   Cancelled: 'bg-red-50 text-red-700 ring-red-200',
   Completed: 'bg-slate-100 text-slate-600 ring-slate-200',
-  Refunded: 'bg-slate-100 text-slate-600 ring-slate-200',
+  Refunded: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   Rescheduled: 'bg-blue-50 text-blue-700 ring-blue-200',
   Active: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   Maintenance: 'bg-amber-50 text-amber-700 ring-amber-200',
+  Retired: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
 
 export const currency = (amount) =>

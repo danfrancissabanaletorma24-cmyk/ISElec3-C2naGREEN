@@ -1,7 +1,7 @@
 // src/admin/AdminUsersPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Search, BadgeCheck, X, Users, Wallet, Ticket, CalendarDays, Phone, Mail, ArrowUpRight, Pencil, KeyRound,
+  Search, BadgeCheck, X, Users, Wallet, Ticket, CalendarDays, Phone, Mail, ArrowUpRight, Pencil, KeyRound, UserPlus,
 } from 'lucide-react';
 import { currency } from '../data/adminData';
 import { loadAllAdminBookings } from './adminBookingData';
@@ -92,6 +92,11 @@ export default function AdminUsersPage() {
     gender: '',
   });
   const [editError, setEditError] = useState('');
+  const EMPTY_ADD_FORM = { firstName: '', lastName: '', email: '', contactNumber: '', password: '', age: '', gender: '' };
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
+  const [addError, setAddError] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
   const [resettingPasswordUserId, setResettingPasswordUserId] = useState(null);
   const [passwordForm, setPasswordForm] = useState({ newPassword: '', confirmPassword: '' });
   const [passwordError, setPasswordError] = useState('');
@@ -231,6 +236,54 @@ export default function AdminUsersPage() {
     }
   };
 
+  const openAddUser = () => {
+    setAddForm(EMPTY_ADD_FORM);
+    setAddError('');
+    setIsAddOpen(true);
+  };
+
+  const handleAddUser = async (event) => {
+    event.preventDefault();
+    const firstName = addForm.firstName.trim();
+    const email = addForm.email.trim().toLowerCase();
+    const contactNumber = addForm.contactNumber.trim();
+    const age = addForm.age === '' ? undefined : Number(addForm.age);
+
+    if (!firstName) { setAddError('First name is required.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setAddError('Enter a valid email address.'); return; }
+    if (contactNumber.replace(/\D/g, '').length < 10) { setAddError('Enter a valid phone number with at least 10 digits.'); return; }
+    if (addForm.password.length < 6) { setAddError('Password must be at least 6 characters.'); return; }
+    if (age !== undefined && !(age >= 1 && age <= 120)) { setAddError('Age must be between 1 and 120.'); return; }
+
+    setAddError('');
+    setActionError('');
+    setActionNotice('');
+    setIsAdding(true);
+    try {
+      const created = await apiRequest('/users', {
+        token,
+        method: 'POST',
+        body: {
+          firstName,
+          lastName: addForm.lastName.trim(),
+          email,
+          contactNumber,
+          password: addForm.password,
+          role: 'user',
+          ...(age !== undefined ? { age } : {}),
+          ...(addForm.gender ? { gender: addForm.gender } : {}),
+        },
+      });
+      setAccounts((current) => [created, ...current]);
+      setActionNotice(`${firstName} was added as a user.`);
+      setIsAddOpen(false);
+    } catch (error) {
+      setAddError(error.message || 'Could not add this user.');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
   const openPasswordReset = (user) => {
     setPasswordForm({ newPassword: '', confirmPassword: '' });
     setPasswordError('');
@@ -293,6 +346,7 @@ export default function AdminUsersPage() {
             <h2 className="text-base font-bold text-slate-900">User directory</h2>
             <p className="text-xs text-slate-500">{filtered.length} of {users.length} users</p>
           </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
           <div className="relative w-full md:w-80">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -301,6 +355,14 @@ export default function AdminUsersPage() {
               placeholder="Search name, email or phone…"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-slate-400 focus:border-[#0056FF] focus:bg-white focus:ring-2 focus:ring-[#0056FF]/15"
             />
+          </div>
+          <button
+            type="button"
+            onClick={openAddUser}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0056FF] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+          >
+            <UserPlus className="h-4 w-4" /> Add user
+          </button>
           </div>
         </div>
 
@@ -622,6 +684,82 @@ export default function AdminUsersPage() {
                 className="rounded-lg bg-[#0056FF] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
               >
                 {updatingUserId === editingUserId ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {isAddOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4">
+          <form onSubmit={handleAddUser} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Add user</h2>
+                <p className="mt-1 text-sm text-slate-500">Creates a customer account that can sign in right away.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close add user form"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[
+                ['firstName', 'First name', 'text', 'given-name'],
+                ['lastName', 'Last name', 'text', 'family-name'],
+                ['email', 'Email', 'email', 'off'],
+                ['contactNumber', 'Contact number', 'tel', 'off'],
+                ['password', 'Temporary password', 'password', 'new-password'],
+                ['age', 'Age (optional)', 'number', 'off'],
+              ].map(([field, label, type, autoComplete]) => (
+                <label key={field} className="block space-y-1 text-sm font-medium text-slate-700">
+                  {label}
+                  <input
+                    type={type}
+                    autoComplete={autoComplete}
+                    value={addForm[field]}
+                    onChange={(event) => setAddForm({ ...addForm, [field]: event.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 font-normal outline-none focus:border-[#0056FF]"
+                  />
+                </label>
+              ))}
+              <label className="block space-y-1 text-sm font-medium text-slate-700">
+                Gender (optional)
+                <select
+                  value={addForm.gender}
+                  onChange={(event) => setAddForm({ ...addForm, gender: event.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-normal outline-none focus:border-[#0056FF]"
+                >
+                  <option value="">Not specified</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+              </label>
+            </div>
+            <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+              Share the temporary password with the user securely. A one-time code is also emailed to them at every sign in.
+            </p>
+            {addError && <p className="text-sm text-red-600" role="alert">{addError}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAddOpen(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isAdding}
+                className="rounded-lg bg-[#0056FF] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {isAdding ? 'Adding…' : 'Add user'}
               </button>
             </div>
           </form>

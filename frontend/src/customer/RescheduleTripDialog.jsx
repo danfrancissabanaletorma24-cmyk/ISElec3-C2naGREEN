@@ -4,23 +4,27 @@ import Modal from './Modal';
 import { useAuth } from '../auth/AuthContext';
 import { apiRequest } from '../api';
 import {
-  formatISODate, getDestination, toISODate, formatTime, getSeatClassLabel,
+  formatISODate, getDestination, formatTime, getSeatClassLabel,
 } from '../data/customerData';
+import { REASON_MAX, cleanReasonText, validateReason } from './reasons';
 
-const VOLUNTARY_REASONS = ['Change of plans', 'Medical emergency', 'Work or school schedule', 'Missed the ferry timing', 'Other'];
+const USER_REASONS = ['Change of plans', 'Medical emergency', 'Work or school schedule', 'Missed the ferry timing', 'Other'];
+const ADMIN_REASONS = ['Bad weather', 'Vessel maintenance', 'Schedule change', 'Customer request', 'Other'];
 
 const selectClass = 'w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition-colors focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20';
 
+const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
 /**
- * Reschedule a booking to another sailing on the same route.
- * `trip` is a booking from mapBooking(). The server only offers sailings that are valid for it
- * (same route, in the future, seats of the same class free, fare not higher than what was paid).
+ * Reschedule a booking to another sailing on the same route - for the customer and for the admin.
+ * Only dates that still have a sailing with room in the seat class that was paid for (economy / business / VIP)
+ * can be chosen; each departure shows how many seats of that class are left.
+ * `trip` is a booking from mapBooking() (or the admin's rescheduleTrip). The reason must be valid.
  */
-export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
+export default function RescheduleTripDialog({ trip, open, onClose, onDone, asAdmin = false }) {
   const { token } = useAuth();
-  const [today] = useState(() => toISODate(new Date()));
-  const [date, setDate] = useState(() => (trip?.date && trip.date > today ? trip.date : today));
-  const [options, setOptions] = useState([]);
+  const [data, setData] = useState(null);
+  const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [newTripId, setNewTripId] = useState('');
   const [seatPlan, setSeatPlan] = useState({}); // ticketId -> seatNumber
@@ -42,12 +46,36 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
     setLoading(true);
     setError('');
     setNewTripId('');
-    apiRequest(`/bookings/${trip.id}/reschedule-options?date=${date}`, { token })
-      .then((result) => { if (active) setOptions(result.options || []); })
-      .catch((e) => { if (active) { setOptions([]); setError(e.message); } })
+    apiRequest(`/bookings/${trip.id}/reschedule-options`, { token })
+      .then((result) => {
+        if (!active) return;
+        setData(result);
+        const dates = (result.availableDates || []).map((d) => d.date).sort();
+        setDate((current) => (dates.includes(current) ? current : dates[0] || ''));
+      })
+      .catch((e) => { if (active) { setData(null); setError(e.message); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [open, trip, date, token]);
+  }, [open, trip, token]);
+
+  const dates = useMemo(
+    () => [...(data?.availableDates || [])].sort((a, b) => a.date.localeCompare(b.date)),
+    [data],
+  );
+  const options = useMemo(
+    () => (data?.options || []).filter((o) => o.date === date),
+    [data, date],
+  );
+  const needed = data?.neededSeatsByClass || {};
+  const neededText = Object.entries(needed).map(([cls, n]) => `${n} ${getSeatClassLabel(cls)}`).join(', ');
+
+  const pickDate = (value) => {
+    setDate(value);
+    setNewTripId('');
+    setSeatPlan({});
+    setFreeSeats([]);
+    setError('');
+  };
 
   const choose = async (option) => {
     setNewTripId(option.trip._id);
@@ -73,16 +101,22 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
   };
 
   const close = () => {
+    if (saving) return;
     setError('');
     onClose();
   };
 
   const handleConfirm = async () => {
-    const reason = operatorCancelled
-      ? (trip.tripCancelReason || 'Trip cancelled by the operator')
-      : (reasonChoice === 'Other' ? otherReason.trim() : reasonChoice);
-    if (!newTripId) return setError('Choose the new departure.');
-    if (!reason || reason.length < 3) return setError('Please give a reason for rescheduling.');
+    let reason = '';
+    if (operatorCancelled) {
+      reason = trip.tripCancelReason || 'Trip cancelled by the operator';
+    } else {
+      if (!reasonChoice) return setError('Please choose a reason for rescheduling.');
+      reason = reasonChoice === 'Other' ? cleanReasonText(otherReason) : reasonChoice;
+      const problem = validateReason(reason, 'reason for rescheduling');
+      if (problem) return setError(problem);
+    }
+    if (!newTripId) return setError('Choose the new date and departure.');
     if (trip.bookingType === 'passenger' && passengerTickets.some((t) => !seatPlan[t._id])) {
       return setError('Choose a seat for every passenger.');
     }
@@ -101,7 +135,7 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
             : {}),
         },
       });
-      const chosen = options.find((o) => o.trip._id === newTripId);
+      const chosen = (data?.options || []).find((o) => o.trip._id === newTripId);
       onDone?.(`Booking ${trip.bookingRef} moved to ${formatISODate(date)} at ${formatTime(chosen?.trip.departureAt)}.`);
     } catch (e) {
       setError(e.message);
@@ -112,6 +146,7 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
 
   const from = trip?.from ? getDestination(trip.from) : null;
   const to = trip?.to ? getDestination(trip.to) : null;
+  const reasons = asAdmin ? ADMIN_REASONS : USER_REASONS;
 
   return (
     <Modal
@@ -119,24 +154,15 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
       onClose={close}
       title="Reschedule this trip"
       description={operatorCancelled
-        ? 'Your trip was cancelled by the operator. Pick a new departure at no extra cost.'
-        : 'Move your booking to another departure on the same route.'}
+        ? 'This trip was cancelled by the operator. Pick a new departure at no extra cost.'
+        : 'Move the booking to another departure on the same route.'}
       maxWidth="max-w-lg"
       footer={(
         <>
-          <button
-            type="button"
-            onClick={close}
-            className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-          >
+          <button type="button" onClick={close} className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">
             Keep Current Trip
           </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={saving}
-            className="rounded-xl bg-[#0056FF] px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-800 disabled:opacity-60"
-          >
+          <button type="button" onClick={handleConfirm} disabled={saving || loading} className="rounded-xl bg-[#0056FF] px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-800 disabled:opacity-60">
             {saving ? 'Saving…' : 'Confirm Reschedule'}
           </button>
         </>
@@ -150,40 +176,51 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
               <span className="text-right font-semibold text-slate-900">{from.city} ({from.code}) → {to.city} ({to.code})</span>
             </div>
             <div className="mt-2 flex items-center justify-between gap-4">
-              <span className="text-slate-500">Vessel</span>
-              <span className="font-semibold text-slate-900">{trip.ship}</span>
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-4">
               <span className="text-slate-500">Current schedule</span>
-              <span className="text-right font-semibold text-slate-900">
-                {formatISODate(trip.date)} · {trip.departure} – {trip.arrival}
-              </span>
+              <span className="text-right font-semibold text-slate-900">{formatISODate(trip.date)} · {trip.departure} – {trip.arrival}</span>
             </div>
+            {neededText && (
+              <div className="mt-2 flex items-center justify-between gap-4">
+                <span className="text-slate-500">Paid for</span>
+                <span className="text-right font-semibold text-slate-900">{neededText} seat{Object.values(needed).reduce((a, b) => a + b, 0) === 1 ? '' : 's'}</span>
+              </div>
+            )}
           </div>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">New date</span>
-            <input
-              type="date"
-              value={date}
-              min={today}
-              onChange={(event) => setDate(event.target.value)}
-              className={selectClass}
-            />
-          </label>
-
           <div>
-            <span className="mb-1 block text-xs font-semibold text-slate-600">New departure</span>
+            <span className="mb-1 block text-xs font-semibold text-slate-600">New date (only dates with available seats)</span>
             {loading ? (
-              <p className="text-sm text-slate-500">Checking available departures…</p>
-            ) : options.length === 0 ? (
+              <p className="text-sm text-slate-500">Checking available dates…</p>
+            ) : dates.length === 0 ? (
               <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-                No departures on this route for {formatISODate(date)}. Try another date.
+                No upcoming departure on this route has room for this booking right now. Please check again later.
               </p>
             ) : (
+              <div className="flex flex-wrap gap-2">
+                {dates.map((item) => (
+                  <button
+                    key={item.date}
+                    type="button"
+                    aria-pressed={date === item.date}
+                    onClick={() => pickDate(item.date)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${date === item.date ? 'border-[#0056FF] bg-blue-50 text-[#0056FF]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {shortDate(item.date)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {dates.length > 0 && (
+            <div>
+              <span className="mb-1 block text-xs font-semibold text-slate-600">Available departures on {date ? formatISODate(date) : '—'}</span>
               <div className="space-y-2">
                 {options.map((option) => {
                   const selected = newTripId === option.trip._id;
+                  const seatInfo = trip.bookingType === 'passenger'
+                    ? Object.keys(needed).map((cls) => `${option.availableSeatsByClass?.[cls] || 0} ${getSeatClassLabel(cls)} left`).join(' · ')
+                    : `${Math.round(option.availableKg || 0).toLocaleString()} kg cargo space`;
                   return (
                     <button
                       key={option.trip._id}
@@ -191,23 +228,21 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
                       disabled={!option.canAccommodate}
                       onClick={() => choose(option)}
                       aria-pressed={selected}
-                      className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
-                        selected ? 'border-[#0056FF] bg-blue-50' : 'border-slate-200 hover:bg-slate-50'
-                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                      className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${selected ? 'border-[#0056FF] bg-blue-50' : 'border-slate-200 hover:bg-slate-50'} disabled:cursor-not-allowed disabled:opacity-50`}
                     >
                       <span className="font-semibold text-slate-900">
                         {formatTime(option.trip.departureAt)} – {formatTime(option.trip.arrivalAt)}
+                        <span className="ml-2 text-xs font-normal text-slate-500">{option.trip.boat?.name}</span>
                       </span>
-                      <span className="text-xs text-slate-500">
-                        {option.trip.boat?.name}
-                        {!option.canAccommodate && ' · not available for your booking'}
+                      <span className="text-right text-xs text-slate-500">
+                        {option.canAccommodate ? seatInfo : option.unavailableReason || 'Not available'}
                       </span>
                     </button>
                   );
                 })}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {trip.bookingType === 'passenger' && newTripId && (
             <div className="space-y-2">
@@ -235,20 +270,20 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
 
           {!operatorCancelled && (
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold text-slate-600">Reason</span>
+              <span className="mb-1 block text-xs font-semibold text-slate-600">Reason for rescheduling (required)</span>
               <select
                 value={reasonChoice}
                 onChange={(event) => { setReasonChoice(event.target.value); setError(''); }}
                 className={selectClass}
               >
                 <option value="">Select a reason…</option>
-                {VOLUNTARY_REASONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                {reasons.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
               {reasonChoice === 'Other' && (
-                <input
-                  type="text"
+                <textarea
                   value={otherReason}
-                  onChange={(event) => setOtherReason(event.target.value)}
+                  onChange={(event) => { setOtherReason(event.target.value.slice(0, REASON_MAX)); setError(''); }}
+                  rows={3}
                   placeholder="Tell us why"
                   className={`${selectClass} mt-2`}
                 />
@@ -260,8 +295,8 @@ export default function RescheduleTripDialog({ trip, open, onClose, onDone }) {
           <div className="flex gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
             <CalendarClock className="h-4 w-4 shrink-0" />
             <p>
-              Your fare stays the same. You can reschedule up to 4 hours before departure, to a sailing on the
-              same route with seats in the same class and a fare that is not higher than what you paid.
+              The fare stays the same. Seats are kept in the same class that was paid for
+              {asAdmin ? '.' : ', and you can reschedule up to 4 hours before departure.'}
             </p>
           </div>
         </div>

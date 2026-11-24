@@ -71,13 +71,15 @@ function mapAdminBooking(booking) {
 
   // Determine the status displayed on the admin side.
   const displayStatus =
-    booking.status === 'cancelled'
-      ? 'Cancelled'
-      : booking.status === 'reschedule_pending'
-        ? 'Reschedule pending'
-        : booking.status === 'completed' || arrived
-          ? 'Completed'
-          : BOOKING_STATUS_LABELS[booking.status] || booking.status || 'Unknown';
+    payment?.status === 'refunded'
+      ? 'Refunded'
+      : booking.status === 'cancelled'
+        ? 'Cancelled'
+        : booking.status === 'reschedule_pending'
+          ? 'Reschedule pending'
+          : booking.status === 'completed' || arrived
+            ? 'Completed'
+            : BOOKING_STATUS_LABELS[booking.status] || booking.status || 'Unknown';
 
   const bookingType = booking.bookingType === 'cargo' ? 'Cargo' : 'Passenger';
   const routeCodes = tripRoute(trip);
@@ -132,10 +134,24 @@ function mapAdminBooking(booking) {
         'Payment'
       : 'No payment record',
 
+    // why the booking is cancelled / rescheduled (shown in the booking details)
+    cancelReason: booking.cancelReason || '',
+    cancelledBy: booking.cancelledBy || '',
+    cancelledAt: booking.cancelledAt || '',
+    tripCancelReason: trip.cancelReason || '',
+    rescheduleHistory: (booking.rescheduleHistory || []).map((item) => ({
+      reason: item.reason || '',
+      by: item.by || '',
+      at: item.at || '',
+      fromAt: item.fromTrip?.departureAt || '',
+      toAt: item.toTrip?.departureAt || '',
+    })),
+
     paymentId: payment?._id || '',
     paymentChannel: payment?.channel || '',
     paymentMethod: payment?.method || '',
     paymentStatus: payment?.status || '',
+    refund: payment?.refund?.status ? payment.refund : null,
     bankTransferSenderName: payment?.bankTransferSenderName || '',
     bankTransferSenderBank: payment?.bankTransferSenderBank || '',
     bankTransferReference: payment?.bankTransferReference || '',
@@ -148,6 +164,8 @@ function mapAdminBooking(booking) {
 
     // Use the calculated status instead of the raw database status.
     status: displayStatus,
+    rawStatus: booking.status,
+    refunded: payment?.status === 'refunded',
 
     passengers,
     cargo,

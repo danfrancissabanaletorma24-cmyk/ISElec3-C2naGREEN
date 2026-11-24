@@ -130,7 +130,7 @@ export default function SearchResultsPage({
 
   return (
     <div className="flex min-h-screen bg-[#F4F7FB] font-sans text-slate-800">
-
+      
       {/* ================= SIDEBAR ================= */}
       <CustomerSidebar
         open={mobileOpen}
@@ -158,7 +158,7 @@ export default function SearchResultsPage({
               />
             </div>
           )}
-
+          
           {/* Results Header */}
           <div className="flex justify-between items-center mb-6 gap-3">
             <h1 className="text-xl font-bold text-slate-900">
@@ -232,7 +232,7 @@ export default function SearchResultsPage({
                 return (
                 <div key={trip._id} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:border-[#0056FF]/30 hover:shadow-md transition-all">
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-
+                    
                     {/* Left: Ship Info */}
                     <div className="flex items-center gap-4 w-full md:w-[35%]">
                       <img src={trip.boat?.imageUrl || HERO_IMG} alt={trip.boat?.name} className="w-16 h-16 rounded-xl object-cover" />

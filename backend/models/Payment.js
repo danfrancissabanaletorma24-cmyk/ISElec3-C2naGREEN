@@ -28,6 +28,19 @@ const paymentSchema = new mongoose.Schema(
     paidAt: Date,
     confirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // admin/cashier who received cash
     refundedAt: Date,
+    // Refund request / decision. The requester's reason and the admin's reason are kept separately
+    // so both sides can read them.
+    refund: {
+      status: { type: String, enum: ['requested', 'rejected', 'refunded'] },
+      requestedBy: { type: String, enum: ['user', 'admin'] },
+      requestedByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      reason: { type: String, trim: true, maxlength: 500 }, // why the refund was asked for
+      requestedAt: Date,
+      amount: { type: Number, min: 0 },
+      adminReason: { type: String, trim: true, maxlength: 500 }, // admin's reason for refunding / rejecting
+      processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      processedAt: Date,
+    },
   },
   { timestamps: true }
 );

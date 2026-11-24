@@ -8,6 +8,7 @@ router.get('/my', c.getMyBookings); // must stay above '/:id'
 router.get('/', adminOnly, c.getAllBookings);
 router.get('/:id', c.getBooking);
 router.patch('/:id/cancel', c.cancelBooking);
+router.delete('/:id', adminOnly, c.deleteBooking);
 router.get('/:id/reschedule-options', c.getRescheduleOptions);
 router.post('/:id/reschedule', c.rescheduleBooking);
 

@@ -2,6 +2,14 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
 const generateToken = require('../utils/generateToken');
+const {
+  createOtpAuthUrl,
+  decryptSecret,
+  encryptSecret,
+  generateSecret,
+  verifyTotp,
+} = require('../utils/totp');
+const jwt = require('jsonwebtoken');
 
 const pick = (obj, keys) => keys.reduce((o, k) => (obj[k] !== undefined ? { ...o, [k]: obj[k] } : o), {});
 
@@ -27,7 +35,8 @@ exports.register = asyncHandler(async (req, res) => {
 async function authenticate(req, requiredRole) {
   const { email, password } = req.body;
   if (typeof email !== 'string' || typeof password !== 'string') throw httpError(400, 'Email and password are required');
-  const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+  const user = await User.findOne({ email: email.toLowerCase() })
+    .select('+password +totpSecret +totpLastUsedStep');
   if (!user || !(await user.matchPassword(password))) throw httpError(401, 'Invalid email or password');
   if (!user.isActive) throw httpError(403, 'Your account has been deactivated');
   if (requiredRole && user.role !== requiredRole) {
@@ -36,16 +45,76 @@ async function authenticate(req, requiredRole) {
   return user;
 }
 
+async function beginMfa(user, res) {
+  const setupRequired = !user.totpEnabled;
+  if (setupRequired) {
+    user.totpSecret = encryptSecret(generateSecret());
+    user.totpLastUsedStep = undefined;
+    await user.save();
+  }
+  const challengeToken = jwt.sign(
+    { id: user._id, purpose: 'login-mfa' },
+    process.env.JWT_SECRET,
+    { expiresIn: '10m' },
+  );
+  res.json({
+    requiresMfa: true,
+    setupRequired,
+    challengeToken,
+    ...(setupRequired ? { otpauthUrl: createOtpAuthUrl(decryptSecret(user.totpSecret), user.email) } : {}),
+  });
+}
+
 // POST /api/auth/login - customer and administrator accounts
 exports.login = asyncHandler(async (req, res) => {
   const user = await authenticate(req);
-  res.json({ token: generateToken(user._id), user });
+  return beginMfa(user, res);
 });
 
 // POST /api/auth/admin/login - administrator accounts only
 exports.adminLogin = asyncHandler(async (req, res) => {
   const user = await authenticate(req, 'admin');
-  res.json({ token: generateToken(user._id), user });
+  return beginMfa(user, res);
+});
+
+// POST /api/auth/verify-mfa
+exports.verifyMfa = asyncHandler(async (req, res) => {
+  const { challengeToken, code } = req.body;
+  if (typeof challengeToken !== 'string' || typeof code !== 'string') {
+    throw httpError(400, 'Authenticator code is required');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(challengeToken, process.env.JWT_SECRET);
+  } catch {
+    throw httpError(401, 'Your sign-in challenge has expired. Please log in again.');
+  }
+  if (decoded.purpose !== 'login-mfa') throw httpError(401, 'Invalid sign-in challenge');
+
+  const user = await User.findById(decoded.id).select('+totpSecret +totpLastUsedStep');
+  if (!user || !user.isActive || !user.totpSecret) {
+    throw httpError(401, 'Sign-in could not be verified');
+  }
+  const step = verifyTotp(decryptSecret(user.totpSecret), code);
+  if (step === null) throw httpError(401, 'Invalid authenticator code');
+
+  const replayGuard = user.totpLastUsedStep === undefined
+    ? { $or: [{ totpLastUsedStep: { $exists: false } }, { totpLastUsedStep: { $lt: step } }] }
+    : { totpLastUsedStep: { $lt: step } };
+  const updatedUser = await User.findOneAndUpdate(
+    {
+      _id: user._id,
+      totpSecret: user.totpSecret,
+      totpEnabled: user.totpEnabled,
+      ...replayGuard,
+    },
+    { $set: { totpEnabled: true, totpLastUsedStep: step } },
+    { new: true },
+  );
+  if (!updatedUser) throw httpError(401, 'This authenticator code has already been used');
+
+  res.json({ token: generateToken(updatedUser._id), user: updatedUser });
 });
 
 // GET /api/auth/me
@@ -72,7 +141,7 @@ exports.updateMe = asyncHandler(async (req, res) => {
   // empty strings from the form mean "not set"
   ['age', 'gender'].forEach((k) => { if (data[k] === '' || data[k] === null) data[k] = undefined; });
 
-  const user = await User.findById(req.user._id);
+  const user = req.user;
   user.set(data);
   if (body.preferences && typeof body.preferences === 'object') {
     const preferencePatch = pick(body.preferences, ['notificationsEmail', 'notificationsSms', 'promotions', 'defaultClass', 'language', 'currency', 'wallets', 'cards']);
@@ -165,3 +234,16 @@ exports.changePassword = asyncHandler(async (req, res) => {
   await user.save();
   res.json({ message: 'Password updated' });
 });
+
+// PUT /api/auth/reset-password - reset the signed-in user's password without the old password
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const { newPassword } = req.body;
+  if (typeof newPassword !== 'string' || newPassword.length < 8) {
+    throw httpError(400, 'Password must be at least 8 characters');
+  }
+  const user = await User.findById(req.user._id);
+  user.password = newPassword;
+  await user.save();
+  res.json({ message: 'Password reset' });
+});
+

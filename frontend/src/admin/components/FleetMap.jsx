@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -31,14 +31,24 @@ function createShipIcon(vessel, selected) {
 function FitFleet({ vessels, resetKey }) {
   const map = useMap();
 
+  // Only re-fit when the set of routes actually changes. The vessel positions update every couple of
+  // seconds, so depending on `vessels` here would keep resetting whatever zoom/pan the admin chose.
+  const pathSignature = useMemo(
+    () => [...new Set(vessels.map((vessel) => vessel.route))].sort().join('|'),
+    [vessels],
+  );
+  const latestVessels = useRef(vessels);
+  latestVessels.current = vessels;
+
   useEffect(() => {
-    const points = vessels.flatMap((vessel) => vessel.path ?? []);
+    const points = latestVessels.current.flatMap((vessel) => vessel.path ?? []);
     if (points.length === 0) return;
     map.fitBounds(L.latLngBounds(points.map(([lat, lng]) => L.latLng(lat, lng))), {
       padding: [46, 46],
       maxZoom: 8,
+      animate: false,
     });
-  }, [map, vessels, resetKey]);
+  }, [map, pathSignature, resetKey]);
 
   return null;
 }
@@ -82,7 +92,7 @@ export default function FleetMap({ vessels, selectedId, onSelect, height = '520p
         center={center}
         zoom={6}
         className="h-full w-full"
-        scrollWheelZoom={false}
+        scrollWheelZoom
         attributionControl
       >
         <TileLayer

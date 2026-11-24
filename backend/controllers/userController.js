@@ -9,7 +9,19 @@ const controller = crud(User, {
   searchFields: ['firstName', 'lastName', 'email', 'contactNumber'],
   filterFields: ['role', 'isActive'],
   prepare: async (data, _req, currentUser) => {
-    if (!currentUser || data.email === undefined) return data;
+    if (!currentUser) {
+      // creating a user (admin "Add user")
+      data.email = String(data.email || '').trim().toLowerCase();
+      if (!data.email) throw httpError(400, 'Email is required');
+      if (typeof data.password !== 'string' || data.password.length < 6) {
+        throw httpError(400, 'Password must be at least 6 characters');
+      }
+      if (await User.findOne({ email: data.email })) throw httpError(409, 'Email is already registered');
+      data.role = data.role === 'admin' ? 'admin' : 'user';
+      delete data._id;
+      return data;
+    }
+    if (data.email === undefined) return data;
     data.email = String(data.email).trim().toLowerCase();
     const emailOwner = await User.findOne({
       email: data.email,

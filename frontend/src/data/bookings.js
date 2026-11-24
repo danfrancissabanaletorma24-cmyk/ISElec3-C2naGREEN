@@ -102,6 +102,18 @@ export function mapBooking(booking) {
     price: booking.totalAmount,
 
     cancelReason: booking.cancelReason || '',
+    cancelledBy: booking.cancelledBy || '',
+    cancelledAt: booking.cancelledAt || '',
+    // every past reschedule, so the ticket can show its history
+    rescheduleHistory: (booking.rescheduleHistory || []).map((item) => ({
+      reason: item.reason || '',
+      by: item.by || '',
+      at: item.at || '',
+      fromAt: item.fromTrip?.departureAt || '',
+      toAt: item.toTrip?.departureAt || '',
+    })),
+    // paid online -> cancelling also sends the refund request
+    paidOnline: payment?.status === 'paid' && payment?.channel === 'online',
 
     refundStatus:
       payment?.status === 'refund_pending'
@@ -109,6 +121,7 @@ export function mapBooking(booking) {
         : payment?.status === 'refunded'
           ? 'refunded'
           : '',
+    refunded: payment?.status === 'refunded',
 
     paid: payment?.status === 'paid',
 

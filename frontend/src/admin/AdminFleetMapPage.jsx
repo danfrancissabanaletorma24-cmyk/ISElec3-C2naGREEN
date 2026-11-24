@@ -42,9 +42,15 @@ export default function AdminFleetMapPage() {
     const loop = (seconds % SIMULATION_LOOP_SECONDS) / SIMULATION_LOOP_SECONDS;
 
     return vessels.map((vessel, index) => {
-      const [from, to] = getRoutePortCodes(vessel.route) ?? ['MNL', 'CEB'];
+      const occupancy = vessel.capacity ? Math.round((vessel.sold / vessel.capacity) * 100) : 0;
+      const codes = getRoutePortCodes(vessel.route);
+      if (!codes) {
+        // no route assigned yet: listed, but nothing to draw on the map
+        return { ...vessel, from: '', to: '', path: [], progress: 0, position: null, occupancy };
+      }
+      const [from, to] = codes;
       const path = getRoutePath(from, to);
-      const isUnderMaintenance = vessel.status === 'Maintenance';
+      const isUnderMaintenance = vessel.status !== 'Active';
       const progress = isUnderMaintenance ? 0 : (loop + index * 0.137) % 1;
       const position = getPointAlongPath(path, progress);
 
@@ -55,9 +61,7 @@ export default function AdminFleetMapPage() {
         path,
         progress,
         position,
-        occupancy: vessel.capacity
-          ? Math.round((vessel.sold / vessel.capacity) * 100)
-          : 0,
+        occupancy,
       };
     });
   }, [now, vessels]);

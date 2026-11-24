@@ -55,7 +55,7 @@ export default function DashboardPage() {
     try {
       await apiRequest(`/bookings/${cancelTarget.id}/cancel`, { token, method: 'PATCH', body: { reason } });
       setToast(cancelTarget.paid
-        ? `Trip ${cancelTarget.bookingRef} cancelled. Your refund of ₱${cancelTarget.price.toLocaleString()} is being processed.`
+        ? `Trip ${cancelTarget.bookingRef} cancelled. Your refund of ₱${cancelTarget.price.toLocaleString()} ${cancelTarget.paidOnline ? 'was requested and ' : ''}is being processed.`
         : `Trip ${cancelTarget.bookingRef} cancelled.`);
       setCancelTarget(null);
       reload();
@@ -152,6 +152,7 @@ export default function DashboardPage() {
                       const from = getDestination(ticket.from);
                       const to = getDestination(ticket.to);
                       const isCancelled = ticket.status === 'cancelled';
+                      const isRefunded = isCancelled && ticket.refundStatus === 'refunded';
                       return (
                         <div
                           key={ticket.id}
@@ -174,15 +175,17 @@ export default function DashboardPage() {
                             </p>
                             <div className="mt-2 flex flex-wrap items-center gap-2">
                               <span className={`inline-block text-xs font-bold px-3 py-1 rounded-full ${
-                                isCancelled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-800'
+                                isRefunded
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : isCancelled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-800'
                               }`}>
-                                {isCancelled ? 'Cancelled' : ticket.needsReschedule ? 'Trip cancelled by operator' : ticket.awaitingPayment ? 'Awaiting payment' : 'Confirmed'}
+                                {isRefunded ? 'Refunded' : isCancelled ? 'Cancelled' : ticket.needsReschedule ? 'Trip cancelled by operator' : ticket.awaitingPayment ? 'Awaiting payment' : 'Confirmed'}
                               </span>
                               {isCancelled && ticket.refundStatus && (
-                                <span className="text-xs font-medium text-red-600">
+                                <span className={`text-xs font-medium ${isRefunded ? 'text-emerald-700' : 'text-red-600'}`}>
                                   {ticket.refundStatus === 'pending'
                                     ? `Refund of ₱${ticket.price.toLocaleString()} is being processed.`
-                                    : `Refund of ₱${ticket.price.toLocaleString()} completed.`}
+                                    : `Refund of ₱${ticket.price.toLocaleString()} was successful.`}
                                 </span>
                               )}
                               {ticket.needsReschedule && (
@@ -222,7 +225,7 @@ export default function DashboardPage() {
                                     onClick={() => setCancelTarget(ticket)}
                                     className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 md:w-auto"
                                   >
-                                    <XCircle className="h-4 w-4" /> Cancel Trip
+                                    <XCircle className="h-4 w-4" /> {ticket.paidOnline ? 'Cancel & Refund' : 'Cancel Trip'}
                                   </button>
                                 )}
                                 {ticket.cancelLockedReason && (

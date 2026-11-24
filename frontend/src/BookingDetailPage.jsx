@@ -5,10 +5,11 @@ import { ArrowLeft, CalendarClock, CheckCircle, Download, Ticket, XCircle } from
 import CustomerSidebar from './customer/CustomerSidebar';
 import CustomerHeader from './customer/CustomerHeader';
 import useSidebarState from './hooks/useSidebarState';
-import Modal from './customer/Modal';
+import PaymentConfirmationModal from './customer/PaymentConfirmationModal';
 import Toast from './customer/Toast';
 import CancelTripDialog from './customer/CancelTripDialog';
 import RescheduleTripDialog from './customer/RescheduleTripDialog';
+import RefundStatusCard from './customer/RefundStatusCard';
 import { statusBadge } from './MyBookingsPage';
 import { useAuth } from './auth/AuthContext';
 import { useCurrency } from './currency/CurrencyContext';
@@ -16,7 +17,13 @@ import { apiRequest } from './api';
 import { mapBooking } from './data/bookings';
 import { getDestination, formatISODate, formatDateTime, FARE_CATEGORY_LABELS, getSeatClassLabel } from './data/customerData';
 
-const METHOD_LABELS = { cash: 'Cash at the port counter', gcash: 'GCash', maya: 'Maya', card: 'Credit / Debit Card', bank_transfer: 'Bank Transfer' };
+const METHOD_LABELS = {
+  cash: 'Cash at the port counter',
+  gcash: 'GCash',
+  maya: 'Maya',
+  card: 'Credit / Debit Card',
+  bank_transfer: 'Bank Transfer',
+};
 
 async function downloadInvoicePdf(booking, invoice) {
   const { jsPDF } = await import('jspdf');
@@ -100,7 +107,9 @@ export default function BookingDetailPage() {
   const handleCancel = async (reason) => {
     try {
       await apiRequest(`/bookings/${id}/cancel`, { token, method: 'PATCH', body: { reason } });
-      setToast(booking.paid ? 'Booking cancelled. Your refund is being processed.' : 'Booking cancelled.');
+      setToast(booking.paidOnline
+        ? 'Booking cancelled. Your refund request was sent and is being processed.'
+        : booking.paid ? 'Booking cancelled. Your refund is being processed.' : 'Booking cancelled.');
     } catch (e) {
       setToast(e.message);
     }
@@ -108,10 +117,14 @@ export default function BookingDetailPage() {
     load();
   };
 
-  const handlePayNow = async () => {
+  const handlePayNow = async (verificationCode) => {
     setPaying(true);
     try {
-      await apiRequest(`/payments/${booking.payment._id}/pay-online`, { token, method: 'POST' });
+      await apiRequest(`/payments/${booking.payment._id}/pay-online`, {
+        token,
+        method: 'POST',
+        body: { verificationCode },
+      });
       setPayPromptOpen(false);
       setPayPromptDismissed(true);
       setToast('Payment received. Your ticket is ready.');
@@ -159,7 +172,34 @@ export default function BookingDetailPage() {
                       <p className="mt-1">Choose a new departure at no extra cost, or cancel for a refund.</p>
                     </div>
                   )}
-                  {booking.status === 'cancelled' && booking.cancelReason && <p className="mt-3 text-sm text-slate-500">Reason: {booking.cancelReason}</p>}
+                  {booking.status === 'cancelled' && (
+                    <div className="mt-3 text-sm text-slate-500">
+                      <p>
+                        Cancelled by {booking.cancelledBy === 'admin' ? 'the operator (admin)' : booking.cancelledBy === 'user' ? 'you' : 'the system'}
+                        {booking.cancelledAt ? ` · ${formatDateTime(booking.cancelledAt)}` : ''}
+                      </p>
+                      {booking.cancelReason && <p className="mt-1">Reason: {booking.cancelReason}</p>}
+                    </div>
+                  )}
+
+                  {booking.rescheduleHistory?.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
+                      <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Reschedule history</p>
+                      <ul className="mt-2 space-y-2 text-blue-900">
+                        {booking.rescheduleHistory.map((item, index) => (
+                          <li key={index} className="rounded-lg bg-white/70 px-3 py-2 text-xs">
+                            <p className="font-semibold">
+                              {item.fromAt ? formatDateTime(item.fromAt) : 'Previous schedule'}
+                              {' → '}
+                              {item.toAt ? formatDateTime(item.toAt) : 'New schedule'}
+                            </p>
+                            <p>Moved by {item.by === 'admin' ? 'the operator' : 'you'}{item.at ? ` · ${formatDateTime(item.at)}` : ''}</p>
+                            {item.reason && <p className="mt-0.5 text-blue-800">{item.reason}</p>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   <div className="mt-5 flex flex-wrap gap-3">
                     {booking.paid && booking.status !== 'cancelled' && (
@@ -170,11 +210,13 @@ export default function BookingDetailPage() {
                         Pay {format(booking.price)} now
                       </button>
                     )}
-                    {(booking.canReschedule || booking.needsReschedule) && (
-                      <button type="button" onClick={() => setRescheduleOpen(true)} className="flex items-center gap-2 rounded-xl border border-blue-200 px-4 py-2.5 text-sm font-semibold text-[#0056FF] hover:bg-blue-50"><CalendarClock className="h-4 w-4" /> Reschedule</button>
+                    {(booking.canReschedule || booking.needsReschedule) ? (
+                      <button type="button" onClick={() => setRescheduleOpen(true)} className="flex items-center gap-2 rounded-xl border border-blue-200 px-4 py-2.5 text-sm font-semibold text-[#0056FF] hover:bg-blue-50"><CalendarClock className="h-4 w-4" /> Reschedule trip</button>
+                    ) : booking.cancelLockedReason && (
+                      <button type="button" disabled title={booking.cancelLockedReason} className="flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-400"><CalendarClock className="h-4 w-4" /> Reschedule trip</button>
                     )}
                     {(booking.canCancel || booking.needsReschedule) && (
-                      <button type="button" onClick={() => setCancelOpen(true)} className="flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"><XCircle className="h-4 w-4" /> Cancel booking</button>
+                      <button type="button" onClick={() => setCancelOpen(true)} className="flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"><XCircle className="h-4 w-4" /> {booking.paidOnline ? 'Cancel & refund' : 'Cancel booking'}</button>
                     )}
                   </div>
                   {booking.cancelLockedReason && <p className="mt-3 text-xs text-slate-400">{booking.cancelLockedReason}</p>}
@@ -228,6 +270,7 @@ export default function BookingDetailPage() {
                       {payment.status === 'pending' && payment.dueAt && <div className="flex justify-between"><dt className="text-slate-500">Pay before</dt><dd className="font-semibold">{formatDateTime(payment.dueAt)}</dd></div>}
                     </dl>
                   ) : <p className="text-sm text-slate-500">No payment record.</p>}
+                  <RefundStatusCard refund={payment?.refund} className="mt-4" />
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -263,57 +306,23 @@ export default function BookingDetailPage() {
       {booking && rescheduleOpen && (
         <RescheduleTripDialog trip={booking} open onClose={() => setRescheduleOpen(false)} onDone={(message) => { setRescheduleOpen(false); setToast(message); load(); }} />
       )}
-      <Modal
+      <PaymentConfirmationModal
         open={(payPromptOpen || (location.state?.justBooked && !payPromptDismissed))
           && Boolean(booking?.awaitingPayment && payment?.channel === 'online' && payment?.method !== 'bank_transfer')}
         onClose={() => {
           setPayPromptOpen(false);
           setPayPromptDismissed(true);
         }}
-        title="Pay for Your Booking"
-        description="Review your payment details to complete your booking."
-        footer={(
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                setPayPromptOpen(false);
-                setPayPromptDismissed(true);
-              }}
-              className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              Pay later
-            </button>
-            <button
-              type="button"
-              onClick={handlePayNow}
-              disabled={paying}
-              className="rounded-xl bg-[#0056FF] px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-800 disabled:opacity-60"
-            >
-              {paying ? 'Processing…' : `Pay ${booking ? format(booking.price) : ''} now`}
-            </button>
-          </>
-        )}
-      >
-        {booking && (
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Payment method</span>
-              <span className="font-semibold">
-                {METHOD_LABELS[payment?.method] || payment?.method}
-                {payment?.walletAccountLast4 ? ` · Wallet ending ${payment.walletAccountLast4}` : ''}
-              </span>
-            </div>
-            <div className="flex justify-between border-t border-slate-100 pt-3">
-              <span className="text-slate-500">Total</span>
-              <span className="font-bold text-[#0056FF]">{format(booking.price)}</span>
-            </div>
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Online payments are simulated in this demo. The booking remains pending until you select Pay now.
-            </p>
-          </div>
-        )}
-      </Modal>
+        onConfirm={handlePayNow}
+        method={payment?.method}
+        identifier={payment?.cardAccountLast4
+          ? `${payment.cardBrand || 'Card'} ending ${payment.cardAccountLast4}`
+          : payment?.walletAccountLast4
+            ? `ending ${payment.walletAccountLast4}`
+            : ''}
+        amount={booking ? format(booking.price) : ''}
+        processing={paying}
+      />
       <CancelTripDialog ticket={booking} open={cancelOpen} onClose={() => setCancelOpen(false)} onConfirm={handleCancel} />
       <Toast message={toast} onClose={() => setToast('')} />
     </div>

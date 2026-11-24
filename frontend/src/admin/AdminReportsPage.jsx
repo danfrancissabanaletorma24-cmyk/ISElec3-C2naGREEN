@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Download, TrendingUp, Ticket, Wallet, Percent, ArrowUpRight } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, TrendingUp, Ticket, Wallet, Percent, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { apiRequest } from '../api';
 import { useAuth } from '../auth/AuthContext';
 import { currency } from '../data/adminData';
@@ -57,20 +57,34 @@ export default function AdminReportsPage() {
   const [bookings, setBookings] = useState([]);
   const [trips, setTrips] = useState([]);
   const [isLoadingReports, setIsLoadingReports] = useState(true);
-  const [reportsError, setReportsError] = useState('');
+  const [reportsError, setReportsError] = useState(''); // bookings failed: nothing useful to show
+  const [tripsError, setTripsError] = useState(''); // trips failed: only occupancy is affected
+  const [reloadKey, setReloadKey] = useState(0);
   const [today] = useState(() => new Date());
+
+  const retry = useCallback(() => {
+    setIsLoadingReports(true);
+    setReloadKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadAllAdminBookings(token), loadAllAdminTrips(token)])
-      .then(([bookingItems, tripItems]) => {
+    // Load both independently so one failing request does not blank the whole page.
+    Promise.allSettled([loadAllAdminBookings(token), loadAllAdminTrips(token)])
+      .then(([bookingResult, tripResult]) => {
         if (!active) return;
-        setBookings(bookingItems);
-        setTrips(tripItems);
-        setReportsError('');
-      })
-      .catch((error) => {
-        if (active) setReportsError(error.message);
+        if (bookingResult.status === 'fulfilled') {
+          setBookings(bookingResult.value);
+          setReportsError('');
+        } else {
+          setReportsError(bookingResult.reason?.message || 'Could not load bookings.');
+        }
+        if (tripResult.status === 'fulfilled') {
+          setTrips(tripResult.value);
+          setTripsError('');
+        } else {
+          setTripsError(tripResult.reason?.message || 'Could not load trips.');
+        }
       })
       .finally(() => {
         if (active) setIsLoadingReports(false);
@@ -79,7 +93,7 @@ export default function AdminReportsPage() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, reloadKey]);
 
   const period = useMemo(() => {
     const end = new Date(today);
@@ -257,10 +271,21 @@ export default function AdminReportsPage() {
         </button>
       </div>
 
-      {reportsError && (
-        <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          Could not load live report data: {reportsError}
-        </p>
+      {(reportsError || tripsError) && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>
+            {reportsError
+              ? `Could not load booking data: ${reportsError}`
+              : `Occupancy data is unavailable right now (${tripsError}). Other figures are up to date.`}
+          </span>
+          <button
+            type="button"
+            onClick={retry}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-red-700 ring-1 ring-red-200 hover:bg-red-100"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Retry
+          </button>
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -268,7 +293,7 @@ export default function AdminReportsPage() {
           { label: 'Revenue', value: metricValue(currency(summary.revenue)), icon: Wallet },
           { label: 'Bookings', value: metricValue(summary.bookings.toLocaleString()), icon: Ticket },
           { label: 'Average ticket', value: metricValue(currency(summary.average)), icon: TrendingUp },
-          { label: 'Avg. occupancy', value: metricValue(`${summary.occupancy}%`), icon: Percent },
+          { label: 'Avg. occupancy', value: tripsError && !isLoadingReports ? '—' : metricValue(`${summary.occupancy}%`), icon: Percent },
         ].map(({ label, value, icon: Icon }) => (
           <div key={label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
@@ -287,6 +312,7 @@ export default function AdminReportsPage() {
           {isLoadingReports ? <p className="text-sm text-slate-500">Loading report data…</p> : !reportsError && (
             <AreaChart data={series} valueFormat={(value) => currency(value)} />
           )}
+          {!isLoadingReports && reportsError && <p role="alert" className="text-sm text-red-600">Revenue data unavailable.</p>}
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
@@ -377,8 +403,8 @@ export default function AdminReportsPage() {
                     : 'No successful payment transactions in this period. '}
               {!isLoadingReports && !reportsError && (topOccupancyRoute?.occupied > 0
                 ? `${topOccupancyRoute.route} has the highest occupancy at ${topOccupancyRoute.occupancy}%.`
-                : topOccupancyRoute
-                  ? 'Masbate → Pilar has the highest occupancy at 66%.'
+                : tripsError
+                  ? 'Trip occupancy is unavailable right now.'
                   : 'No trip occupancy data in this period.')}
             </p>
           </div>

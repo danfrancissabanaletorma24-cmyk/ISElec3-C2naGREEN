@@ -4,10 +4,13 @@ const Booking = require('../models/Booking');
 const Ticket = require('../models/Ticket');
 const Payment = require('../models/Payment');
 const Invoice = require('../models/Invoice');
+const Notification = require('../models/Notification');
+const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
 const generateRef = require('../utils/generateRef');
 const { notify } = require('../utils/notify');
+const { cleanReason } = require('../utils/reason');
 const { computeFare, computeCargoPrice, round2 } = require('../utils/pricing');
 const C = require('../config/constants');
 
@@ -26,6 +29,8 @@ const bookingPopulate = [
     ],
   },
   { path: 'tickets' },
+  { path: 'rescheduleHistory.fromTrip', select: 'departureAt arrivalAt' },
+  { path: 'rescheduleHistory.toTrip', select: 'departureAt arrivalAt' },
   {
     path: 'payment',
     select: '+bankTransferProofDataUrl',
@@ -374,6 +379,7 @@ exports.cancelBooking = asyncHandler(async (req, res) => {
   if (!booking) throw httpError(404, 'Booking not found');
   if (!isOwnerOrAdmin(booking, req.user)) throw httpError(403, 'Not your booking');
   if (['cancelled', 'completed'].includes(booking.status)) throw httpError(400, `Booking is already ${booking.status}`);
+  const reason = cleanReason(req.body.reason, { label: 'reason for cancelling' });
 
   const trip = await Trip.findById(booking.trip);
   const hoursLeft = (trip.departureAt.getTime() - Date.now()) / 3600000;
@@ -387,23 +393,112 @@ exports.cancelBooking = asyncHandler(async (req, res) => {
   await Ticket.updateMany({ booking: booking._id }, { status: 'cancelled', holdsSeat: false });
   booking.status = 'cancelled';
   booking.cancelledAt = new Date();
-  booking.cancelReason = typeof req.body.reason === 'string' ? req.body.reason : undefined;
+  booking.cancelReason = reason;
+  booking.cancelledBy = req.user.role === 'admin' ? 'admin' : 'user';
   await booking.save();
 
   const payment = await Payment.findOne({ booking: booking._id });
   if (payment) {
-    payment.status = payment.status === 'paid' ? 'refund_pending' : 'cancelled';
+    if (payment.status === 'paid') {
+      payment.status = 'refund_pending';
+      payment.refund = {
+        status: 'requested',
+        requestedBy: req.user.role === 'admin' ? 'admin' : 'user',
+        requestedByUser: req.user._id,
+        reason: (booking.cancelReason || 'Booking cancelled').slice(0, 500),
+        requestedAt: new Date(),
+        amount: payment.amount,
+      };
+    } else {
+      payment.status = 'cancelled';
+    }
     await payment.save();
   }
 
   await notify(booking.user, {
     title: 'Booking cancelled',
-    message: `Booking ${booking.bookingReference} was cancelled.${payment && payment.status === 'refund_pending' ? ' Your refund is being processed.' : ''}`,
+    message: `Booking ${booking.bookingReference} was cancelled${req.user.role === 'admin' ? ' by the operator' : ''}. Reason: ${reason}.${payment && payment.status === 'refund_pending' ? ' Your refund is being processed.' : ''}`,
     type: 'booking',
     booking: booking._id,
   });
 
   res.json(await Booking.findById(booking._id).populate(bookingPopulate));
+});
+
+// DELETE /api/bookings/:id  (admin)
+// A booking can only be removed once it is cancelled or its refund was approved.
+exports.deleteBooking = asyncHandler(async (req, res) => {
+  let booking = null;
+  let bookingId = null;
+  const requestedBookingId = req.body?.bookingId || req.params.id;
+  const requestedReference = typeof req.body?.bookingReference === 'string'
+    ? req.body.bookingReference.trim()
+    : '';
+
+  if (mongoose.Types.ObjectId.isValid(requestedBookingId)) {
+    booking = await Booking.findById(requestedBookingId);
+  }
+
+  if (!booking && requestedReference) {
+    booking = await Booking.findOne({ bookingReference: requestedReference });
+  }
+
+  if (booking) {
+    bookingId = booking._id;
+  } else if (mongoose.Types.ObjectId.isValid(requestedBookingId)) {
+    // The booking row may already be missing, but tickets, payments and
+    // invoices can still reference its ObjectId. Clean those orphan records too.
+    bookingId = new mongoose.Types.ObjectId(requestedBookingId);
+  } else {
+    throw httpError(404, 'Booking not found');
+  }
+
+  const payment = await Payment.findOne({ booking: bookingId });
+  const refunded = payment?.status === 'refunded';
+  const trip = booking?.trip ? await Trip.findById(booking.trip) : null;
+  const tripHasArrived = Boolean(
+    trip?.arrivalAt &&
+    new Date(trip.arrivalAt).getTime() < Date.now()
+  );
+
+  if (booking && !refunded) {
+    if (!['cancelled', 'completed'].includes(booking.status) && !tripHasArrived) {
+      throw httpError(400, 'Only cancelled, completed or refunded bookings can be deleted');
+    }
+    if (
+      booking.status === 'cancelled' &&
+      ['paid', 'refund_pending'].includes(payment?.status)
+    ) {
+      throw httpError(400, 'Approve or decline the refund before deleting this booking');
+    }
+    if (
+      !['cancelled', 'completed'].includes(booking.status) &&
+      !tripHasArrived &&
+      payment?.status === 'paid'
+    ) {
+      throw httpError(400, 'Refund the payment before deleting this booking');
+    }
+  }
+
+  const [tickets, payments, invoices, notifications] = await Promise.all([
+    Ticket.deleteMany({ booking: bookingId }),
+    Payment.deleteMany({ booking: bookingId }),
+    Invoice.deleteMany({ booking: bookingId }),
+    Notification.deleteMany({ booking: bookingId }),
+  ]);
+
+  const deletedBooking = await Booking.deleteOne({ _id: bookingId });
+
+  res.json({
+    message: 'Booking deleted permanently',
+    deleted: {
+      booking: deletedBooking.deletedCount,
+      tickets: tickets.deletedCount,
+      payments: payments.deletedCount,
+      invoices: invoices.deletedCount,
+      notifications: notifications.deletedCount,
+    },
+  });
 });
 
 // ---------- weather / operator cancellation: reschedule ----------
@@ -442,30 +537,29 @@ const loadReschedulableBooking = async (id, user) => {
   return { booking, voluntary };
 };
 
-// GET /api/bookings/:id/reschedule-options
+// GET /api/bookings/:id/reschedule-options[?date=YYYY-MM-DD]
+// Looks at the next RESCHEDULE_WINDOW_DAYS days of sailings on the booking's route and works out, for the exact
+// seat class(es) the customer paid for (economy / business / vip), which sailings still have room.
+//   availableDates -> only the dates that have at least one sailing that can take this booking
+//   options        -> the sailings (of `date` when given, otherwise all of them) with seats left per class
+const RESCHEDULE_WINDOW_DAYS = 45;
+const phDate = (date) => new Date(date.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+
 exports.getRescheduleOptions = asyncHandler(async (req, res) => {
   const { booking, voluntary } = await loadReschedulableBooking(req.params.id, req.user);
   const oldTrip = await Trip.findById(booking.trip);
   const tickets = await Ticket.find({ booking: booking._id, status: 'valid' });
 
-  const tripFilter = {
+  const wantedDate = typeof req.query.date === 'string' && req.query.date ? req.query.date : '';
+  if (wantedDate && !/^\d{4}-\d{2}-\d{2}$/.test(wantedDate)) throw httpError(400, 'date must be YYYY-MM-DD');
+
+  const now = new Date();
+  const trips = await Trip.find({
     route: oldTrip.route,
     status: 'scheduled',
-    departureAt: { $gt: new Date() },
+    departureAt: { $gt: now, $lt: new Date(now.getTime() + RESCHEDULE_WINDOW_DAYS * 24 * 3600 * 1000) },
     _id: { $ne: oldTrip._id },
-  };
-
-  if (typeof req.query.date === 'string') {
-    const start = new Date(`${req.query.date}T00:00:00+08:00`);
-    if (isNaN(start)) throw httpError(400, 'date must be YYYY-MM-DD');
-
-    tripFilter.departureAt = {
-      $gt: new Date(Math.max(start.getTime(), Date.now())),
-      $lt: new Date(start.getTime() + 24 * 3600 * 1000),
-    };
-  }
-
-  const trips = await Trip.find(tripFilter).populate(tripSummaryPopulate).sort('departureAt').limit(30);
+  }).populate(tripSummaryPopulate).sort('departureAt').limit(500);
   const tripIds = trips.map((t) => t._id);
 
   const heldSeats = await Ticket.find({ trip: { $in: tripIds }, holdsSeat: true }).select('trip seatNumber');
@@ -484,6 +578,7 @@ exports.getRescheduleOptions = asyncHandler(async (req, res) => {
 
   const cargoByTrip = new Map(cargoUsed.map((c) => [String(c._id), c.kg]));
 
+  // seats the customer needs, per class they paid for
   const needed = {};
   tickets.filter((t) => t.type === 'passenger').forEach((t) => {
     needed[t.seatClass] = (needed[t.seatClass] || 0) + 1;
@@ -491,27 +586,34 @@ exports.getRescheduleOptions = asyncHandler(async (req, res) => {
 
   const cargoWeight = tickets.filter((t) => t.type === 'cargo').reduce((s, t) => s + t.cargo.weightKg, 0);
 
-  const options = trips.map((trip) => {
+  const all = trips.map((trip) => {
     const plain = trip.toObject();
-    delete plain.boat.seats;
+    if (plain.boat) delete plain.boat.seats;
+    const boatSeats = trip.boat?.seats || [];
+    const date = phDate(trip.departureAt);
 
     if (booking.bookingType === 'passenger') {
       const taken = takenByTrip.get(String(trip._id)) || new Set();
       const free = {};
 
-      trip.boat.seats.forEach((s) => {
+      boatSeats.forEach((s) => {
         if (!taken.has(s.seatNumber)) free[s.seatClass] = (free[s.seatClass] || 0) + 1;
       });
 
       const fareOk = tickets
         .filter((t) => t.type === 'passenger')
         .every((t) => (trip.fares[t.seatClass] || 0) <= t.basePrice);
+      const seatsOk = Object.entries(needed).every(([cls, n]) => (free[cls] || 0) >= n);
 
       return {
+        date,
         trip: plain,
         availableSeatsByClass: free,
         fareOk,
-        canAccommodate: fareOk && Object.entries(needed).every(([cls, n]) => (free[cls] || 0) >= n),
+        canAccommodate: fareOk && seatsOk,
+        unavailableReason: !seatsOk
+          ? `Not enough ${Object.keys(needed).join(' / ')} seats left`
+          : (!fareOk ? 'Fare is higher than what you paid' : ''),
       };
     }
 
@@ -520,7 +622,7 @@ exports.getRescheduleOptions = asyncHandler(async (req, res) => {
     const cargoSeatsFit = tickets
       .filter((ticket) => ticket.type === 'cargo' && ticket.holdsSeat && ticket.seatNumber)
       .every((ticket) => {
-        const seat = trip.boat.seats.find((item) => item.seatNumber === ticket.seatNumber);
+        const seat = boatSeats.find((item) => item.seatNumber === ticket.seatNumber);
         const taken = takenByTrip.get(String(trip._id)) || new Set();
 
         return seat?.seatClass === 'vip'
@@ -529,12 +631,20 @@ exports.getRescheduleOptions = asyncHandler(async (req, res) => {
           && trip.fares.vip <= (ticket.cargo.vipSeatPrice || 0);
       });
 
+    const cargoOk = trip.cargoRatePerKg > 0 && cargoWeight <= availableKg;
+
     return {
+      date,
       trip: plain,
       availableKg,
-      canAccommodate: trip.cargoRatePerKg > 0 && cargoWeight <= availableKg && cargoSeatsFit,
+      canAccommodate: cargoOk && cargoSeatsFit,
+      unavailableReason: !cargoOk ? 'Not enough cargo space' : (!cargoSeatsFit ? 'VIP seat not available' : ''),
     };
   });
+
+  const dateCounts = new Map();
+  all.filter((o) => o.canAccommodate).forEach((o) => dateCounts.set(o.date, (dateCounts.get(o.date) || 0) + 1));
+  const availableDates = [...dateCounts.entries()].map(([date, departures]) => ({ date, departures }));
 
   res.json({
     bookingId: booking._id,
@@ -542,7 +652,8 @@ exports.getRescheduleOptions = asyncHandler(async (req, res) => {
     bookingType: booking.bookingType,
     neededSeatsByClass: needed,
     cargoWeightKg: cargoWeight,
-    options,
+    availableDates,
+    options: wantedDate ? all.filter((o) => o.date === wantedDate) : all,
   });
 });
 
@@ -551,9 +662,8 @@ exports.rescheduleBooking = asyncHandler(async (req, res) => {
   const { booking, voluntary } = await loadReschedulableBooking(req.params.id, req.user);
   const oldTrip = await Trip.findById(booking.trip);
   const { newTripId, seats } = req.body;
-  const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
-
-  if (voluntary && reason.length < 3) throw httpError(400, 'Please give a reason for rescheduling');
+  // a customer / admin reschedule needs a valid reason; when the operator cancelled the trip it is optional
+  const reason = cleanReason(req.body.reason, { label: 'reason for rescheduling', required: voluntary });
 
   const newTrip = await Trip.findById(newTripId).populate('boat');
   if (!newTrip) throw httpError(404, 'New trip not found');
@@ -670,6 +780,7 @@ exports.rescheduleBooking = asyncHandler(async (req, res) => {
     fromTrip: oldTrip._id,
     toTrip: newTrip._id,
     reason: voluntary ? reason : (reason || oldTrip.cancelReason),
+    by: req.user.role === 'admin' ? 'admin' : 'user',
   });
 
   booking.trip = newTrip._id;
@@ -683,7 +794,7 @@ exports.rescheduleBooking = asyncHandler(async (req, res) => {
 
   await notify(booking.user, {
     title: 'Booking rescheduled',
-    message: `Booking ${booking.bookingReference} was moved to ${newTrip.departureAt.toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}.`,
+    message: `Booking ${booking.bookingReference} was moved to ${newTrip.departureAt.toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}${req.user.role === 'admin' ? ' by the operator' : ''}${reason ? `. Reason: ${reason}` : ''}.`,
     type: 'booking',
     booking: booking._id,
     trip: newTrip._id,

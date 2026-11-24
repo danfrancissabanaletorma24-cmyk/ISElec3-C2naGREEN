@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Package, Plane, Ship, CalendarDays, MapPin, Plus, Trash2, Wallet, CreditCard, Landmark, Banknote, Loader2, Upload,
+  ArrowLeft, Package, Ship, CalendarDays, MapPin, Plus, Trash2, Wallet, CreditCard, Landmark, Banknote, Loader2, Upload,
 } from 'lucide-react';
 import CustomerSidebar from './customer/CustomerSidebar';
 import CustomerHeader from './customer/CustomerHeader';
@@ -87,7 +87,7 @@ export default function BookingPage() {
   const [activeKey, setActiveKey] = useState(null);
 
   // ---- cargo
-  const [cargo, setCargo] = useState({ description: '', weightKg: '', recipientName: '', recipientContact: '', vipSeatNumber: '' });
+  const [cargo, setCargo] = useState({ description: '', weightKg: '', recipientName: '', recipientContact: '' });
 
   // ---- payment + submit
   const [payment, setPayment] = useState(null);
@@ -181,9 +181,7 @@ export default function BookingPage() {
   const passengerTotal = priced.reduce((sum, p) => sum + p.price, 0);
   const cargoWeight = Number(cargo.weightKg) || 0;
   const cargoTotal = Math.round(cargoWeight * (trip?.cargoRatePerKg || 0) * 100) / 100;
-  const vipSeat = cargo.vipSeatNumber ? seatByNumber.get(cargo.vipSeatNumber) : null;
-  const vipSeatPrice = vipSeat?.seatClass === 'vip' ? vipSeat.price : 0;
-  const total = activeTab === 'travel' ? passengerTotal : cargoTotal + vipSeatPrice;
+  const total = activeTab === 'travel' ? passengerTotal : cargoTotal;
 
   const profileNeedsAge = useMyDetails && !user?.age;
 
@@ -219,9 +217,6 @@ export default function BookingPage() {
       else if (seatData && cargoWeight > seatData.cargo.availableKg) found.push(`Only ${seatData.cargo.availableKg.toLocaleString()} kg of cargo space is left on this trip.`);
       if (!cargo.recipientName.trim()) found.push('Enter the recipient name.');
       if (!cargo.recipientContact.trim()) found.push('Enter the recipient contact number.');
-      if (cargo.vipSeatNumber && (!vipSeat || vipSeat.seatClass !== 'vip' || !vipSeat.isAvailable || !(vipSeat.price > 0))) {
-        found.push('Choose an available VIP seat.');
-      }
     }
     return found;
   };
@@ -319,7 +314,6 @@ export default function BookingPage() {
           weightKg: cargoWeight,
           recipientName: cargo.recipientName.trim(),
           recipientContact: cargo.recipientContact.trim(),
-          vipSeatNumber: cargo.vipSeatNumber || undefined,
         };
       }
       const booking = await apiRequest('/bookings', { token, method: 'POST', body });
@@ -382,7 +376,7 @@ export default function BookingPage() {
                   onClick={() => { setActiveTab('travel'); setErrors([]); }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'travel' ? 'bg-white text-[#0056FF] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                  <Plane className="w-4 h-4" /> Travel
+                  <Ship className="w-4 h-4" /> Travel
                 </button>
                 <button
                   type="button"
@@ -567,25 +561,6 @@ export default function BookingPage() {
                       </span>
                     </label>
                     <label>
-                      <span className="mb-1 block text-xs font-semibold text-slate-600">VIP seat for sender (optional)</span>
-                      <select
-                        value={cargo.vipSeatNumber}
-                        onChange={(e) => { setCargo({ ...cargo, vipSeatNumber: e.target.value }); setErrors([]); }}
-                        className={inputClass(false)}
-                      >
-                        <option value="">No VIP seat</option>
-                        {(seatsByClass.vip || []).map((seat) => (
-                          <option key={seat.seatNumber} value={seat.seatNumber} disabled={!seat.isAvailable || !(seat.price > 0)}>
-                            {seat.seatNumber} · {format(seat.price)}{seat.isAvailable ? '' : ' (unavailable)'}
-                          </option>
-                        ))}
-                      </select>
-                      {!seatData && <span className="mt-1 block text-xs text-slate-500">Loading VIP seats…</span>}
-                      {seatData && !(seatsByClass.vip || []).some((seat) => seat.isAvailable && seat.price > 0) && (
-                        <span className="mt-1 block text-xs text-slate-500">No VIP seats are available on this trip.</span>
-                      )}
-                    </label>
-                    <label>
                       <span className="mb-1 block text-xs font-semibold text-slate-600">Recipient name <span className="text-red-600">*</span></span>
                       <input
                         value={cargo.recipientName}
@@ -727,12 +702,6 @@ export default function BookingPage() {
                         <span>{format(cargoTotal)}</span>
                       </div>
                     )}
-                    {activeTab === 'cargo' && vipSeat && vipSeatPrice > 0 && (
-                      <div className="flex justify-between">
-                        <span>VIP seat · {vipSeat.seatNumber}</span>
-                        <span>{format(vipSeatPrice)}</span>
-                      </div>
-                    )}
                     <div className="mt-1 flex justify-between border-t border-slate-200 pt-2 text-base font-bold text-slate-900">
                       <span>Total</span><span>{format(total)}</span>
                     </div>
@@ -789,7 +758,6 @@ export default function BookingPage() {
             ) : (
               <>
                 <div className="mt-2 flex justify-between"><span className="text-slate-500">Cargo</span><span className="font-semibold">{cargo.description} · {cargoWeight} kg</span></div>
-                {vipSeat && <div className="mt-2 flex justify-between"><span className="text-slate-500">VIP seat</span><span className="font-semibold">{vipSeat.seatNumber}</span></div>}
                 <div className="mt-2 flex justify-between"><span className="text-slate-500">Recipient</span><span className="font-semibold">{cargo.recipientName.trim()}</span></div>
               </>
             )}

@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import useSidebarState from '../hooks/useSidebarState';
 import { apiRequest } from '../api';
+import { refreshVessels } from '../data/vesselStore';
 import Avatar from '../customer/Avatar';
 
 const NAV_ITEMS = [
@@ -53,6 +54,9 @@ export default function AdminLayout() {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [notificationError, setNotificationError] = useState('');
   const [markingNotificationId, setMarkingNotificationId] = useState(null);
+
+  // Keep the fleet in sync with the database on every admin page (Dashboard, Vessels, Fleet Map).
+  useEffect(() => { refreshVessels(token); }, [token, location.pathname]);
 
   const isCollapsed = collapsed && !mobileOpen;
   const meta = PAGE_META[location.pathname] ?? PAGE_META['/admin'];

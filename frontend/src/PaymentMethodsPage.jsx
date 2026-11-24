@@ -6,6 +6,7 @@ import CustomerSidebar from './customer/CustomerSidebar';
 import CustomerHeader from './customer/CustomerHeader';
 import useSidebarState from './hooks/useSidebarState';
 import Toast from './customer/Toast';
+import PaymentConfirmationModal from './customer/PaymentConfirmationModal';
 import { useAuth } from './auth/AuthContext';
 import { useCurrency } from './currency/CurrencyContext';
 import { apiRequest } from './api';
@@ -39,9 +40,10 @@ export default function PaymentMethodsPage() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [payingId, setPayingId] = useState('');
+  const [paymentToConfirm, setPaymentToConfirm] = useState(null);
   const [walletFormOpen, setWalletFormOpen] = useState(false);
   const [methodType, setMethodType] = useState('wallet');
-  const [walletForm, setWalletForm] = useState({ provider: 'gcash', accountNumber: '' });
+  const [walletForm, setWalletForm] = useState({ provider: 'gcash', accountNumber: '', pin: '' });
   const [walletError, setWalletError] = useState('');
   const [savingWallet, setSavingWallet] = useState(false);
   const [removingWalletId, setRemovingWalletId] = useState('');
@@ -55,6 +57,7 @@ export default function PaymentMethodsPage() {
   const openMethodForm = (type) => {
     setMethodType(type);
     setCardForm({ ...EMPTY_CARD_FORM });
+    setWalletForm({ provider: 'gcash', accountNumber: '', pin: '' });
     setWalletError('');
     setCardError('');
     setWalletFormOpen(true);
@@ -63,6 +66,7 @@ export default function PaymentMethodsPage() {
   const closeMethodForm = () => {
     setWalletFormOpen(false);
     setCardForm({ ...EMPTY_CARD_FORM });
+    setWalletForm({ provider: 'gcash', accountNumber: '', pin: '' });
     setWalletError('');
     setCardError('');
   };
@@ -81,10 +85,15 @@ export default function PaymentMethodsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const payNow = async (payment) => {
+  const payNow = async (payment, verificationCode) => {
     setPayingId(payment._id);
     try {
-      await apiRequest(`/payments/${payment._id}/pay-online`, { token, method: 'POST' });
+      await apiRequest(`/payments/${payment._id}/pay-online`, {
+        token,
+        method: 'POST',
+        body: { verificationCode },
+      });
+      setPaymentToConfirm(null);
       setToast('Payment received. Your ticket is ready.');
       await load();
     } catch (e) {
@@ -102,6 +111,10 @@ export default function PaymentMethodsPage() {
       setWalletError('Enter a valid wallet mobile number.');
       return;
     }
+    if (!/^\d{4}$/.test(walletForm.pin)) {
+      setWalletError('Enter your 4-digit wallet PIN.');
+      return;
+    }
     if (wallets.some((wallet) => wallet.provider === walletForm.provider
       && wallet.accountNumber.replace(/\D/g, '') === digits)) {
       setWalletError('This wallet is already saved.');
@@ -112,7 +125,7 @@ export default function PaymentMethodsPage() {
     setWalletError('');
     try {
       await updateUser({ preferences: { wallets: [...wallets, { provider: walletForm.provider, accountNumber }] } });
-      setWalletForm({ provider: 'gcash', accountNumber: '' });
+      setWalletForm({ provider: 'gcash', accountNumber: '', pin: '' });
       setWalletFormOpen(false);
       setToast('Wallet added. You can select it at checkout.');
     } catch (e) {
@@ -336,7 +349,7 @@ export default function PaymentMethodsPage() {
 
             <div className="flex items-start gap-3 rounded-xl border border-green-100 bg-green-50 p-4 text-sm text-green-800 lg:col-span-2">
               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>Only masked card details and wallet numbers are saved. CVV codes and wallet PINs are never stored.</p>
+              <p>Only masked card details and wallet numbers are saved. CVV and wallet PINs are never stored; you will be asked to enter them again when paying.</p>
             </div>
           </section>
 
@@ -358,7 +371,7 @@ export default function PaymentMethodsPage() {
                 <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
                   <div>
                     <h2 id="add-wallet-title" className="text-lg font-bold text-slate-900">Add payment method</h2>
-                    <p className="mt-1 text-sm text-slate-500">Card details are masked after saving. CVV is never stored.</p>
+                    <p className="mt-1 text-sm text-slate-500">Card details are masked after saving. CVV and wallet PINs are never stored.</p>
                   </div>
                   <button
                     type="button"
@@ -419,6 +432,21 @@ export default function PaymentMethodsPage() {
                       placeholder="+63 912 345 6789"
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20"
                     />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-semibold text-slate-600">Wallet PIN</span>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="new-password"
+                      required
+                      maxLength={4}
+                      value={walletForm.pin}
+                      onChange={(event) => setWalletForm({ ...walletForm, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })}
+                      placeholder="••••"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-[#0056FF] focus:ring-2 focus:ring-[#0056FF]/20"
+                    />
+                    <span className="mt-1 block text-xs text-slate-500">This demo checks only the 4-digit format. The PIN is discarded and requested again when you pay.</span>
                   </label>
                   {walletError && <p role="alert" className="text-xs font-medium text-red-600">{walletError}</p>}
                   <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
@@ -589,7 +617,7 @@ export default function PaymentMethodsPage() {
                     {payment.status === 'pending' && payment.channel === 'online' && payment.method !== 'bank_transfer' && (
                       <button
                         type="button"
-                        onClick={() => payNow(payment)}
+                        onClick={() => setPaymentToConfirm(payment)}
                         disabled={payingId === payment._id}
                         className="rounded-lg bg-[#0056FF] px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-60"
                       >
@@ -606,6 +634,19 @@ export default function PaymentMethodsPage() {
           </section>
         </div>
       </main>
+      <PaymentConfirmationModal
+        open={Boolean(paymentToConfirm)}
+        onClose={() => setPaymentToConfirm(null)}
+        onConfirm={(verificationCode) => payNow(paymentToConfirm, verificationCode)}
+        method={paymentToConfirm?.method}
+        identifier={paymentToConfirm?.cardAccountLast4
+          ? `${paymentToConfirm.cardBrand || 'Card'} ending ${paymentToConfirm.cardAccountLast4}`
+          : paymentToConfirm?.walletAccountLast4
+            ? `ending ${paymentToConfirm.walletAccountLast4}`
+            : ''}
+        amount={paymentToConfirm ? format(paymentToConfirm.amount) : ''}
+        processing={Boolean(paymentToConfirm && payingId === paymentToConfirm._id)}
+      />
       <Toast message={toast} onClose={() => setToast('')} />
     </div>
   );
