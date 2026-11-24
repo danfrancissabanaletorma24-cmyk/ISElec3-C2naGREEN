@@ -4,7 +4,9 @@ exports.notFound = (req, res) =>
 // eslint-disable-next-line no-unused-vars
 exports.errorHandler = (err, req, res, next) => {
   let status = err.status || 500;
-  let message = err.message || 'Server error';
+  let message = status >= 500
+    ? 'A server error occurred. Please try again.'
+    : err.message || 'Server error';
 
   if (err.name === 'ValidationError') {
     status = 400;

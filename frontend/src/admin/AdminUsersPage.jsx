@@ -696,7 +696,7 @@ export default function AdminUsersPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Add user</h2>
-                <p className="mt-1 text-sm text-slate-500">Creates a customer account that can sign in right away.</p>
+                <p className="mt-1 text-sm text-slate-500">Creates a customer account they can sign in to with this temporary password.</p>
               </div>
               <button
                 type="button"
@@ -743,7 +743,7 @@ export default function AdminUsersPage() {
               </label>
             </div>
             <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
-              Share the temporary password with the user securely. A one-time code is also emailed to them at every sign in.
+              Share the temporary password with the user securely. On their first sign in they will set up Google Authenticator with a QR code.
             </p>
             {addError && <p className="text-sm text-red-600" role="alert">{addError}</p>}
             <div className="flex justify-end gap-2 pt-2">

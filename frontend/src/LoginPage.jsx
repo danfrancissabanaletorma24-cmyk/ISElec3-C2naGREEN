@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Ship, User, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useAuth } from './auth/AuthContext';
@@ -10,6 +10,8 @@ export default function LoginPage() {
   const HERO_IMG = '/ships/kho-roro.jpg';
   const FALLBACK_IMG = '/ships/montenegro-roro.jpg';
   const navigate = useNavigate();
+  const location = useLocation();
+  const notice = location.state?.notice;
   const { login, verifyMfa } = useAuth();
   const { t } = useLanguage();
   const [email, setEmail] = useState('');
@@ -125,6 +127,9 @@ export default function LoginPage() {
             </div>
 
             <form className="space-y-4" onSubmit={handleSubmit} noValidate>
+              {notice && !challenge && (
+                <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">{notice}</p>
+              )}
               {challenge ? (
                 <>
                   {challenge.setupRequired && (

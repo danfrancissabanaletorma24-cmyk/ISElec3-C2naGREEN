@@ -31,10 +31,7 @@ const bookingPopulate = [
   { path: 'tickets' },
   { path: 'rescheduleHistory.fromTrip', select: 'departureAt arrivalAt' },
   { path: 'rescheduleHistory.toTrip', select: 'departureAt arrivalAt' },
-  {
-    path: 'payment',
-    select: '+bankTransferProofDataUrl',
-  },
+  { path: 'payment' },
 ];
 
 const isOwnerOrAdmin = (doc, user) => user.role === 'admin' || String(doc.user._id || doc.user) === String(user._id);
@@ -311,7 +308,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     throw err;
   }
 
-  res.status(201).json(await Booking.findById(booking._id).populate(bookingPopulate));
+  res.status(201).json({ _id: booking._id });
 });
 
 // GET /api/bookings/my

@@ -44,7 +44,7 @@ export default function RegisterPage() {
 
     try {
       await register(form);
-      navigate('/dashboard');
+      navigate('/login', { replace: true, state: { notice: 'You created an account. Please log in to continue.' } });
     } catch (error) {
       setServerError(error.message);
     }

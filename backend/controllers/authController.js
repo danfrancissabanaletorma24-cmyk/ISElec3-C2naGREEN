@@ -2,6 +2,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
 const generateToken = require('../utils/generateToken');
+const { notify } = require('../utils/notify');
 const {
   createOtpAuthUrl,
   decryptSecret,
@@ -29,6 +30,11 @@ exports.register = asyncHandler(async (req, res) => {
     throw httpError(409, 'Email is already registered');
   }
   const user = await User.create(data);
+  await notify(user._id, {
+    title: 'You created an account',
+    message: `Welcome to LayagExpress, ${user.firstName}! Your account is ready — sign in to start booking trips.`,
+    type: 'system',
+  });
   res.status(201).json({ token: generateToken(user._id), user });
 });
 

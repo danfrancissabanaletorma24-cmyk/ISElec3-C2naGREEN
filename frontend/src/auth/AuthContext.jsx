@@ -90,14 +90,14 @@ export function AuthProvider({ children }) {
     return user;
   };
 
+  // Creates the account only. The user signs in afterwards, which keeps the
+  // authenticator (MFA) step mandatory for every account.
   const register = async ({ name, email, mobile, password }) => {
     const result = await apiRequest('/auth/register', {
       method: 'POST',
       body: { name: name.trim(), email: email.trim().toLowerCase(), mobile: mobile.trim(), password },
     });
-    const user = normalizeUser(result.user);
-    setSession({ role: user.role, user, token: result.token });
-    return user;
+    return normalizeUser(result.user);
   };
 
   const updateUser = async (patch) => {
